@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres-dep
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: banco-postgres
+  template:
+    metadata:
+      labels:
+        app: banco-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          env:
+            - name: POSTGRES_DB
+              value: "banco_db"
+            - name: POSTGRES_USER
+              value: "root"
+            - name: POSTGRES_PASSWORD
+              value: "123"
+          ports:
+            - containerPort: 5432
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service # <- Olha o nome que o Spring Boot tá procurando!
+spec:
+  selector:
+    app: banco-postgres
+  ports:
+    - protocol: TCP
+      port: 5432
+      targetPort: 5432
