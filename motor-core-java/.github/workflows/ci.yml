@@ -1,13 +1,13 @@
-name: Motor Financeiro CI/CD
+name: BazaBank CI/CD
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main" ]
 
 jobs:
-  build-and-push-aws:
+  build-and-push-aw
     runs-on: ubuntu-latest
 
     steps:
