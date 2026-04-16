@@ -4,14 +4,13 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 public class Conta {
-
     private UUID id;
     private String numero;
     private BigDecimal saldo;
 
     public Conta(UUID id, String numero, BigDecimal saldoInicial) {
         if (saldoInicial == null || saldoInicial.compareTo(BigDecimal.ZERO) < 0) {
-            throw new ValorInvalidoException("O saldo inicial não pode ser negativo");
+            throw new ValorInvalidoException("Saldo inicial não pode ser negativo");
         }
         this.id = id;
         this.numero = numero;
@@ -21,8 +20,7 @@ public class Conta {
     public void debitar(BigDecimal valor) {
         validarValor(valor, "débito");
         if (this.saldo.compareTo(valor) < 0) {
-            // Exceção específica de negócio! Facilita o mapeamento para HTTP 422
-            throw new SaldoInsuficienteException("Saldo insuficiente para a operação");
+            throw new SaldoInsuficienteException("Saldo insuficiente");
         }
         this.saldo = this.saldo.subtract(valor);
     }
@@ -32,15 +30,12 @@ public class Conta {
         this.saldo = this.saldo.add(valor);
     }
 
-    private void validarValor(BigDecimal valor, String operacao) {
+    private void validarValor(BigDecimal valor, String op) {
         if (valor == null || valor.compareTo(BigDecimal.ZERO) <= 0) {
-            throw new ValorInvalidoException("O valor do " + operacao + " deve ser maior que zero");
+            throw new ValorInvalidoException("Valor de " + op + " deve ser positivo");
         }
     }
 
     public UUID getId() { return id; }
-    public String getNumero() { return numero; }
     public BigDecimal getSaldo() { return saldo; }
 }
-
-    }
