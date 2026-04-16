@@ -6,6 +6,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -47,7 +49,7 @@ val BazaDark = Color(0xFF121212)       // Preto "fosco" (reduz o cansaço visual
 val BazaAccent = Color.Black           // Preto puro para botões e contrastes absolutos
 val BazaInputBg = Color(0xFFEBEBEB)    // Cinza quase branco para os campos de texto
 
-var saldoGlobal by mutableStateOf(5000.00)
+var saldoGlobal by mutableStateOf(5000.00) // Vai ser atualizado dinamicamente!
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -70,6 +72,7 @@ fun BazaBankNavegacao() {
         composable("registro") { EcraRegistro(navController) }
         composable("home") { EcraHome(navController) }
         composable("transferencia") { EcraTransferencia(navController) }
+        composable("extrato") { EcraExtrato(navController) } // Nova rota do Extrato!
     }
 }
 
@@ -106,22 +109,22 @@ fun BazaTextField(value: String, onValueChange: (String) -> Unit, label: String,
 fun EcraLogin(navController: NavController) {
     var cpf by remember { mutableStateOf("") }
     var senha by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var mensagemErro by remember { mutableStateOf("") }
+    val coroutineScope = rememberCoroutineScope()
 
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // Logo Minimalista Preto
-        Box(
-            modifier = Modifier.size(72.dp).clip(CircleShape).background(BazaAccent),
-            contentAlignment = Alignment.Center
-        ) {
+        // ... (Mantenha o Logo e os Textos Iniciais) ...
+        Box(modifier = Modifier.size(72.dp).clip(CircleShape).background(BazaAccent), contentAlignment = Alignment.Center) {
             Icon(Icons.Outlined.Home, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
         }
         Spacer(modifier = Modifier.height(24.dp))
         Text("BazaBank", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = BazaDark)
-        Text("Exclusive", fontSize = 16.sp, color = Color.Gray, fontWeight = FontWeight.Medium, letterSpacing = 4.sp) // Letter spacing para toque premium
+        Text("Exclusive", fontSize = 16.sp, color = Color.Gray, fontWeight = FontWeight.Medium, letterSpacing = 4.sp)
 
         Spacer(modifier = Modifier.height(48.dp))
 
@@ -129,16 +132,37 @@ fun EcraLogin(navController: NavController) {
         Spacer(modifier = Modifier.height(16.dp))
         BazaTextField(value = senha, onValueChange = { senha = it }, label = "Senha", icon = Icons.Default.Lock, isPassword = true)
 
-        Spacer(modifier = Modifier.height(40.dp))
+        Spacer(modifier = Modifier.height(32.dp))
+
+        if (mensagemErro.isNotEmpty()) {
+            Text(mensagemErro, color = Color(0xFFDC2626), modifier = Modifier.padding(bottom = 16.dp))
+        }
 
         Button(
-            onClick = { navController.navigate("home") },
+            onClick = {
+                coroutineScope.launch {
+                    isLoading = true
+                    mensagemErro = ""
+                    try {
+                        // 1. Faz o Login Real
+                        val resposta = RedeBazaBank.api.login(AuthRequest(cpf, senha))
+                        // 2. Guarda o Crachá na Sessão!
+                        SessaoApp.tokenJwt = resposta.token
+                        // 3. Libera o acesso
+                        navController.navigate("home")
+                    } catch (e: Exception) {
+                        mensagemErro = "❌ CPF ou senha inválidos."
+                    } finally { isLoading = false }
+                }
+            },
             modifier = Modifier.fillMaxWidth().height(60.dp),
             colors = ButtonDefaults.buttonColors(containerColor = BazaAccent),
             shape = RoundedCornerShape(16.dp),
-            elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp)
+            elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp),
+            enabled = !isLoading
         ) {
-            Text("Acessar a minha conta", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            if (isLoading) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(28.dp))
+            else Text("Acessar a minha conta", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
         }
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -156,8 +180,12 @@ fun EcraRegistro(navController: NavController) {
     var nome by remember { mutableStateOf("") }
     var cpf by remember { mutableStateOf("") }
     var senha by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var mensagem by remember { mutableStateOf("") }
+    val coroutineScope = rememberCoroutineScope()
 
     Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
+        // ... (Mantenha os cabeçalhos visuais iguais) ...
         Spacer(modifier = Modifier.height(24.dp))
         IconButton(onClick = { navController.popBackStack() }, modifier = Modifier.offset(x = (-12).dp)) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = BazaDark)
@@ -176,23 +204,59 @@ fun EcraRegistro(navController: NavController) {
 
         Spacer(modifier = Modifier.weight(1f))
 
+        if (mensagem.isNotEmpty()) {
+            Text(mensagem, color = if (mensagem.contains("Sucesso")) Color(0xFF059669) else Color(0xFFDC2626), modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp))
+        }
+
         Button(
-            onClick = { navController.navigate("login") },
+            onClick = {
+                coroutineScope.launch {
+                    isLoading = true
+                    try {
+                        val resposta = RedeBazaBank.api.registrar(AuthRequest(cpf, senha))
+                        if (resposta.isSuccessful) {
+                            mensagem = "✅ Sucesso! Voltando para o login..."
+                            delay(1500)
+                            navController.popBackStack()
+                        } else {
+                            mensagem = "⚠️ CPF já registado ou erro nos dados."
+                        }
+                    } catch (e: Exception) {
+                        mensagem = "❌ Erro de conexão com o banco."
+                    } finally { isLoading = false }
+                }
+            },
             modifier = Modifier.fillMaxWidth().height(60.dp),
             colors = ButtonDefaults.buttonColors(containerColor = BazaAccent),
-            shape = RoundedCornerShape(16.dp)
+            shape = RoundedCornerShape(16.dp),
+            enabled = !isLoading
         ) {
-            Text("Finalizar Cadastro", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            if (isLoading) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(28.dp))
+            else Text("Finalizar Cadastro", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
         }
         Spacer(modifier = Modifier.height(24.dp))
     }
 }
 
 // ==========================================
-// 3. PÁGINA HOME
+// 3. PÁGINA HOME (Agora Sincronizada com o Banco!)
 // ==========================================
 @Composable
 fun EcraHome(navController: NavController) {
+    var isLoadingSaldo by remember { mutableStateOf(true) }
+
+    // Vai buscar o saldo real ao Spring Boot quando a página abre
+    LaunchedEffect(Unit) {
+        try {
+            val respostaConta = RedeBazaBank.api.buscarConta("11111111-1111-1111-1111-111111111111")
+            saldoGlobal = respostaConta.saldo
+        } catch (e: Exception) {
+            println("Erro ao buscar saldo: ${e.message}")
+        } finally {
+            isLoadingSaldo = false
+        }
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
 
         Row(
@@ -213,14 +277,13 @@ fun EcraHome(navController: NavController) {
             }
         }
 
-        // Cartão de Saldo (Estilo BLACK CARD absoluto)
+        // Cartão de Saldo
         Card(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).height(200.dp),
             shape = RoundedCornerShape(24.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
         ) {
             Box(
-                // Gradiente escuro para dar profundidade ao "Black Card"
                 modifier = Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF222222), Color.Black)))
             ) {
                 Column(modifier = Modifier.padding(24.dp).fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
@@ -228,7 +291,12 @@ fun EcraHome(navController: NavController) {
                         Text("Saldo Disponível", color = Color.LightGray, fontSize = 14.sp)
                         Icon(Icons.Outlined.CreditCard, contentDescription = null, tint = Color.LightGray)
                     }
-                    Text("R$ ${String.format("%.2f", saldoGlobal)}", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+
+                    if (isLoadingSaldo) {
+                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(32.dp))
+                    } else {
+                        Text("R$ ${String.format("%.2f", saldoGlobal)}", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                    }
                 }
             }
         }
@@ -243,7 +311,8 @@ fun EcraHome(navController: NavController) {
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             QuickActionButton(icon = Icons.AutoMirrored.Filled.Send, label = "Área PIX", onClick = { navController.navigate("transferencia") })
-            QuickActionButton(icon = Icons.Outlined.CreditCard, label = "Cartões", onClick = { })
+            // O botão de Cartões agora vai para o EXTRATO
+            QuickActionButton(icon = Icons.Outlined.CreditCard, label = "Extrato", onClick = { navController.navigate("extrato") })
             QuickActionButton(icon = Icons.Outlined.Home, label = "Investir", onClick = { })
             QuickActionButton(icon = Icons.Default.Person, label = "Perfil", onClick = { })
         }
@@ -314,7 +383,6 @@ fun EcraTransferencia(navController: NavController) {
             if (mensagemFeedback.isNotEmpty()) {
                 Text(
                     text = mensagemFeedback,
-                    // O verde/vermelho mantêm-se apenas no feedback por ser regra de usabilidade de sucesso/erro
                     color = if (mensagemFeedback.contains("✅")) Color(0xFF059669) else Color(0xFFDC2626),
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp)
@@ -334,7 +402,7 @@ fun EcraTransferencia(navController: NavController) {
                                     saldoGlobal -= valor
                                     mensagemFeedback = "✅ PIX Enviado!"
                                     delay(1000)
-                                    navController.popBackStack()
+                                    navController.popBackStack() // Volta para a Home
                                 }
                             } catch (e: Exception) {
                                 mensagemFeedback = "❌ Erro de rede"
@@ -357,6 +425,98 @@ fun EcraTransferencia(navController: NavController) {
 }
 
 // ==========================================
+// 5. PÁGINA DE EXTRATO (LazyColumn de Alta Performance)
+// ==========================================
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EcraExtrato(navController: NavController) {
+    var transacoes by remember { mutableStateOf<List<TransacaoExtrato>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    val minhaContaId = "11111111-1111-1111-1111-111111111111"
+
+    LaunchedEffect(Unit) {
+        try {
+            transacoes = RedeBazaBank.api.buscarExtrato(minhaContaId)
+        } catch (e: Exception) {
+            println("Erro ao carregar extrato: ${e.message}")
+        } finally {
+            isLoading = false
+        }
+    }
+
+    Column(modifier = Modifier.fillMaxSize().background(BazaBackground)) {
+        TopAppBar(
+            title = { Text("O seu Extrato", fontWeight = FontWeight.Bold, color = BazaDark) },
+            navigationIcon = {
+                IconButton(onClick = { navController.popBackStack() }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = BazaDark)
+                }
+            },
+            colors = TopAppBarDefaults.topAppBarColors(containerColor = BazaBackground)
+        )
+
+        if (isLoading) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = BazaDark)
+            }
+        } else if (transacoes.isEmpty()) {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("Sem movimentos recentes.", color = Color.Gray)
+            }
+        } else {
+            // A Mágica da Performance: LazyColumn
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                items(transacoes) { transacao ->
+                    val isSaida = transacao.contaOrigemId == minhaContaId
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier.size(48.dp).clip(CircleShape).background(if (isSaida) Color(0xFFFEE2E2) else Color(0xFFD1FAE5)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        if (isSaida) Icons.AutoMirrored.Filled.Send else Icons.Outlined.Home,
+                                        contentDescription = null,
+                                        tint = if (isSaida) Color(0xFFDC2626) else Color(0xFF059669)
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(16.dp))
+                                Column {
+                                    Text(if (isSaida) "PIX Enviado" else "PIX Recebido", fontWeight = FontWeight.Bold, color = BazaDark)
+                                    Text(transacao.dataCriacao.take(10), fontSize = 12.sp, color = Color.Gray)
+                                }
+                            }
+                            Text(
+                                text = "${if (isSaida) "-" else "+"} R$ ${String.format("%.2f", transacao.valor)}",
+                                fontWeight = FontWeight.ExtraBold,
+                                fontSize = 16.sp,
+                                color = if (isSaida) BazaDark else Color(0xFF059669)
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ==========================================
 // PREVIEWS
 // ==========================================
 @Preview(showBackground = true, showSystemUi = true, name = "1. Login")
@@ -374,3 +534,7 @@ fun HomePreview() { BazaBankAppTheme { EcraHome(rememberNavController()) } }
 @Preview(showBackground = true, showSystemUi = true, name = "4. Transferência")
 @Composable
 fun TransferenciaPreview() { BazaBankAppTheme { EcraTransferencia(rememberNavController()) } }
+
+@Preview(showBackground = true, showSystemUi = true, name = "5. Extrato")
+@Composable
+fun ExtratoPreview() { BazaBankAppTheme { EcraExtrato(rememberNavController()) } }
