@@ -49,7 +49,6 @@ import br.com.banco.mobile.ui.theme.BazaBankAppTheme
 // ==========================================
 // 1. O CÉREBRO DA APLICAÇÃO (VIEWMODEL)
 // ==========================================
-// Sênior: Nenhuma variável global. O ViewModel gere o estado!
 class BazaViewModel : ViewModel() {
 
     private val _saldo = MutableStateFlow(0.0)
@@ -129,7 +128,7 @@ class BazaViewModel : ViewModel() {
                 val pedido = TransferenciaRequest(SessaoApp.contaIdAtual, chaveDestino, valor)
                 val resposta = RedeBazaBank.api.transferir(pedido)
                 if (resposta.status == "SUCESSO") {
-                    atualizarHome() // Sênior: Rebusca o saldo real do servidor após o PIX!
+                    atualizarHome() // Rebusca o saldo real do servidor após o PIX!
                     onSuccess()
                 }
             } catch (e: Exception) {
@@ -148,7 +147,7 @@ val BazaAccent = Color.Black
 val BazaInputBg = Color(0xFFEBEBEB)
 
 // ==========================================
-// 3. NAVEGAÇÃO PRINCIPAL
+// 3. NAVEGAÇÃO PRINCIPAL E MAIN ACTIVITY
 // ==========================================
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -156,7 +155,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             BazaBankAppTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = BazaBackground) {
-                    val viewModel: BazaViewModel = viewModel() // Injeta o ViewModel Sênior
+                    val viewModel: BazaViewModel = viewModel() // Injeta o ViewModel
                     BazaBankNavegacao(viewModel)
                 }
             }
@@ -167,6 +166,18 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun BazaBankNavegacao(viewModel: BazaViewModel) {
     val navController = rememberNavController()
+
+    // Observador de segurança: expulsa para o login se o token expirar (Erro 401)
+    LaunchedEffect(Unit) {
+        SessaoApp.eventoSessaoExpirada.collect { expirou ->
+            if (expirou) {
+                navController.navigate("login") {
+                    popUpTo(0) { inclusive = true } // Limpa a pilha de navegação
+                }
+            }
+        }
+    }
+
     NavHost(navController = navController, startDestination = "login") {
         composable("login") { EcraLogin(navController, viewModel) }
         composable("registro") { EcraRegistro(navController, viewModel) }
@@ -185,11 +196,10 @@ fun EcraLogin(navController: NavController, viewModel: BazaViewModel) {
     var cpf by remember { mutableStateOf("") }
     var senha by remember { mutableStateOf("") }
 
-    // Observa o estado que vem do ViewModel
     val isLoading by viewModel.isLoading.collectAsState()
     val erro by viewModel.mensagemErro.collectAsState()
 
-    LaunchedEffect(Unit) { viewModel.limparErro() } // Limpa erros ao abrir a tela
+    LaunchedEffect(Unit) { viewModel.limparErro() }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
@@ -218,7 +228,7 @@ fun EcraLogin(navController: NavController, viewModel: BazaViewModel) {
         Button(
             onClick = {
                 viewModel.login(cpf, senha) {
-                    navController.navigate("home") { popUpTo("login") { inclusive = true } } // Impede de voltar pro login pelo botão voltar
+                    navController.navigate("home") { popUpTo("login") { inclusive = true } }
                 }
             },
             modifier = Modifier.fillMaxWidth().height(60.dp),
@@ -291,7 +301,6 @@ fun EcraHome(navController: NavController, viewModel: BazaViewModel) {
     val saldo by viewModel.saldo.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
 
-    // Assim que a tela abre, manda o ViewModel atualizar os dados!
     LaunchedEffect(Unit) { viewModel.atualizarHome() }
 
     Column(modifier = Modifier.fillMaxSize()) {
@@ -309,8 +318,7 @@ fun EcraHome(navController: NavController, viewModel: BazaViewModel) {
                 }
             }
             IconButton(onClick = {
-                SessaoApp.tokenJwt = "" // Logout Sênior
-                navController.navigate("login") { popUpTo("home") { inclusive = true } }
+                SessaoApp.encerrarSessao() // Dispara o evento de logoff
             }) {
                 Icon(Icons.Outlined.Notifications, contentDescription = "Sair", tint = BazaDark)
             }
@@ -346,7 +354,7 @@ fun EcraHome(navController: NavController, viewModel: BazaViewModel) {
         ) {
             QuickActionButton(icon = Icons.AutoMirrored.Filled.Send, label = "Área PIX", onClick = { navController.navigate("transferencia") })
             QuickActionButton(icon = Icons.Outlined.CreditCard, label = "Extrato", onClick = { navController.navigate("extrato") })
-            QuickActionButton(icon = Icons.Outlined.Home, label = "Investir", onClick = { viewModel.atualizarHome() }) // Botão para recarregar saldo
+            QuickActionButton(icon = Icons.Outlined.Home, label = "Atualizar", onClick = { viewModel.atualizarHome() })
             QuickActionButton(icon = Icons.Default.Person, label = "Perfil", onClick = { })
         }
     }

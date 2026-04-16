@@ -4,18 +4,24 @@ import okhttp3.OkHttpClient
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import retrofit2.http.Body
-import retrofit2.http.GET
-import retrofit2.http.POST
-import retrofit2.http.Path
+import retrofit2.http.*
+import kotlinx.coroutines.flow.MutableSharedFlow
 import java.util.concurrent.TimeUnit
 
 // ==========================================
-// 1. SESSÃO E SEGURANÇA (Data Store / Memory)
+// 1. SESSÃO E SEGURANÇA (Gestão Reativa)
 // ==========================================
 object SessaoApp {
     var tokenJwt: String = ""
-    var contaIdAtual: String = "11111111-1111-1111-1111-111111111111" // Idealmente, o backend deve devolver isto no Login!
+    var contaIdAtual: String = "11111111-1111-1111-1111-111111111111"
+
+    // Canal de comunicação Sénior: Avisa a UI quando o token morre
+    val eventoSessaoExpirada = MutableSharedFlow<Boolean>(extraBufferCapacity = 1)
+
+    fun encerrarSessao() {
+        tokenJwt = ""
+        eventoSessaoExpirada.tryEmit(true)
+    }
 }
 
 // ==========================================
@@ -32,7 +38,6 @@ data class TransacaoExtrato(val id: String, val contaOrigemId: String, val conta
 // 3. INTERFACE DA API
 // ==========================================
 interface BazaBankApiService {
-    // SÊNIOR FIX: Usamos Response<Void> porque o backend devolve texto simples e não JSON.
     @POST("/api/auth/registrar")
     suspend fun registrar(@Body request: AuthRequest): Response<Void>
 
@@ -56,18 +61,26 @@ object RedeBazaBank {
     private const val BASE_URL = "http://10.0.2.2:8080"
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS) // Timeouts Sênior
+        .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
         .addInterceptor { chain ->
             val original = chain.request()
+
+            // 1. Cola o Crachá (Token) se existir
+            val requestBuilder = original.newBuilder()
             if (SessaoApp.tokenJwt.isNotEmpty()) {
-                val requestComToken = original.newBuilder()
-                    .header("Authorization", "Bearer ${SessaoApp.tokenJwt}")
-                    .build()
-                chain.proceed(requestComToken)
-            } else {
-                chain.proceed(original)
+                requestBuilder.header("Authorization", "Bearer ${SessaoApp.tokenJwt}")
             }
+
+            // 2. Faz o pedido ao Spring Boot
+            val response = chain.proceed(requestBuilder.build())
+
+            // 3. A CORREÇÃO ESTÁ AQUI: Usar .code() com parênteses!
+            if (response.code() == 401 && SessaoApp.tokenJwt.isNotEmpty()) {
+                SessaoApp.encerrarSessao()
+            }
+
+            response
         }.build()
 
     val api: BazaBankApiService by lazy {
