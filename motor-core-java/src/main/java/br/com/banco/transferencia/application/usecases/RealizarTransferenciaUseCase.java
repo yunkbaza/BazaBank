@@ -28,12 +28,19 @@ public class RealizarTransferenciaUseCase {
 
     @Transactional
     public Transacao executar(UUID origemId, UUID destinoId, BigDecimal valor) {
+        if (origemId.equals(destinoId)) {
+            throw new IllegalArgumentException("Não é possível transferir para a mesma conta.");
+        }
 
-        Conta origem = contaRepository.buscarPorIdComLock(origemId)
-                .orElseThrow(() -> new IllegalArgumentException("Conta de origem não encontrada."));
-
-        Conta destino = contaRepository.buscarPorIdComLock(destinoId)
-                .orElseThrow(() -> new IllegalArgumentException("Conta de destino não encontrada."));
+        // PREVENÇÃO DE DEADLOCK: Ordenação de aquisição de Locks via UUID
+        Conta origem, destino;
+        if (origemId.compareTo(destinoId) < 0) {
+            origem = buscarContaComLock(origemId, "origem");
+            destino = buscarContaComLock(destinoId, "destino");
+        } else {
+            destino = buscarContaComLock(destinoId, "destino");
+            origem = buscarContaComLock(origemId, "origem");
+        }
 
         Transacao transacao = new Transacao(UUID.randomUUID(), origemId, destinoId, valor);
 
@@ -44,7 +51,7 @@ public class RealizarTransferenciaUseCase {
         } catch (Exception e) {
             transacao.falhar();
             transacaoRepository.salvar(transacao);
-            throw e;
+            throw e; // O Spring fará o Rollback do saldo, mas a transação falha fica salva!
         }
 
         contaRepository.salvar(origem);
@@ -56,5 +63,10 @@ public class RealizarTransferenciaUseCase {
         ));
 
         return transacao;
+    }
+
+    private Conta buscarContaComLock(UUID contaId, String tipo) {
+        return contaRepository.buscarPorIdComLock(contaId)
+                .orElseThrow(() -> new IllegalArgumentException("Conta de " + tipo + " não encontrada."));
     }
 }
