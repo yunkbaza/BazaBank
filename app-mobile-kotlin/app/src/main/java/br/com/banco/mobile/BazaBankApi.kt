@@ -1,67 +1,44 @@
 package br.com.banco.mobile
 
 import okhttp3.OkHttpClient
+import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Path
+import java.util.concurrent.TimeUnit
 
 // ==========================================
-// 0. SESSÃO (O "Bolso" que guarda o Crachá do utilizador)
+// 1. SESSÃO E SEGURANÇA (Data Store / Memory)
 // ==========================================
 object SessaoApp {
     var tokenJwt: String = ""
+    var contaIdAtual: String = "11111111-1111-1111-1111-111111111111" // Idealmente, o backend deve devolver isto no Login!
 }
 
 // ==========================================
-// 1. DATA CLASSES (O formato dos dados)
+// 2. DTOs (Data Transfer Objects)
 // ==========================================
-
-// NOVOS: Para o Login e Registo
 data class AuthRequest(val cpf: String, val senha: String)
 data class TokenResponse(val token: String, val cpf: String)
-
-// ANTIGOS: Para as operações bancárias
-data class TransferenciaRequest(
-    val contaOrigemId: String,
-    val contaDestinoId: String,
-    val valor: Double
-)
-
-data class TransacaoResponse(
-    val transacaoId: String,
-    val status: String
-)
-
-data class ContaResponse(
-    val id: String,
-    val titular: String,
-    val saldo: Double
-)
-
-data class TransacaoExtrato(
-    val id: String,
-    val contaOrigemId: String,
-    val contaDestinoId: String,
-    val valor: Double,
-    val dataCriacao: String
-)
+data class TransferenciaRequest(val contaOrigemId: String, val contaDestinoId: String, val valor: Double)
+data class TransacaoResponse(val transacaoId: String, val status: String)
+data class ContaResponse(val id: String, val titular: String, val saldo: Double)
+data class TransacaoExtrato(val id: String, val contaOrigemId: String, val contaDestinoId: String, val valor: Double, val dataCriacao: String)
 
 // ==========================================
-// 2. A INTERFACE DA API (Os Endpoints do Spring Boot)
+// 3. INTERFACE DA API
 // ==========================================
 interface BazaBankApiService {
-
-    // NOVAS ROTAS: Livres (Não exigem Token)
+    // SÊNIOR FIX: Usamos Response<Void> porque o backend devolve texto simples e não JSON.
     @POST("/api/auth/registrar")
-    suspend fun registrar(@Body request: AuthRequest): retrofit2.Response<String>
+    suspend fun registrar(@Body request: AuthRequest): Response<Void>
 
     @POST("/api/auth/login")
     suspend fun login(@Body request: AuthRequest): TokenResponse
 
-    // ROTAS ANTIGAS: Agora protegidas pelo Spring Security!
     @POST("/api/transferencias")
     suspend fun transferir(@Body request: TransferenciaRequest): TransacaoResponse
 
@@ -73,31 +50,30 @@ interface BazaBankApiService {
 }
 
 // ==========================================
-// 3. A CONFIGURAÇÃO DA LIGAÇÃO (Motor Retrofit)
+// 4. CLIENTE RETROFIT CONFIGURADO
 // ==========================================
 object RedeBazaBank {
-    // 10.0.2.2 é o endereço que o emulador usa para chegar ao localhost do Windows
     private const val BASE_URL = "http://10.0.2.2:8080"
 
-    // MÁGICA SÊNIOR: O Interceptor
-    // Antes de qualquer pedido sair do telemóvel, ele passa por aqui.
-    // Se existir um Token guardado, ele "cola" no cabeçalho do pedido automaticamente!
-    private val httpClient = OkHttpClient.Builder().addInterceptor { chain ->
-        val original = chain.request()
-        if (SessaoApp.tokenJwt.isNotEmpty()) {
-            val requestComToken = original.newBuilder()
-                .header("Authorization", "Bearer ${SessaoApp.tokenJwt}")
-                .build()
-            chain.proceed(requestComToken)
-        } else {
-            chain.proceed(original)
-        }
-    }.build()
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS) // Timeouts Sênior
+        .readTimeout(15, TimeUnit.SECONDS)
+        .addInterceptor { chain ->
+            val original = chain.request()
+            if (SessaoApp.tokenJwt.isNotEmpty()) {
+                val requestComToken = original.newBuilder()
+                    .header("Authorization", "Bearer ${SessaoApp.tokenJwt}")
+                    .build()
+                chain.proceed(requestComToken)
+            } else {
+                chain.proceed(original)
+            }
+        }.build()
 
     val api: BazaBankApiService by lazy {
         Retrofit.Builder()
             .baseUrl(BASE_URL)
-            .client(httpClient) // Ligamos o nosso motor customizado aqui!
+            .client(httpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
             .create(BazaBankApiService::class.java)
