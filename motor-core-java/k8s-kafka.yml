@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
         - name: kafka
-          image: confluentinc/cp-kafka:7.4.0
+          image: bitnami/kafka:3.7.0  # <-- CORREÇÃO: Imagem correta para ler as variáveis KAFKA_CFG_
           ports:
             - containerPort: 9092
           env:
