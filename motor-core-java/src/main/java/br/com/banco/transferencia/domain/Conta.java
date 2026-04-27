@@ -37,5 +37,6 @@ public class Conta {
     }
 
     public UUID getId() { return id; }
+    public String getNumero() { return numero; }
     public BigDecimal getSaldo() { return saldo; }
 }
