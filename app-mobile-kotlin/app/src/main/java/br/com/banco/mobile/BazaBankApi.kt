@@ -58,7 +58,7 @@ interface BazaBankApiService {
 // 4. CLIENTE RETROFIT CONFIGURADO
 // ==========================================
 object RedeBazaBank {
-    private const val BASE_URL = "http://10.0.2.2:8080"
+    private const val BASE_URL = "http://10.0.2.2:8081"
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
