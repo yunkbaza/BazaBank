@@ -30,34 +30,133 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
-import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import br.com.banco.mobile.ui.theme.BazaBankAppTheme
 
 // ==========================================
-// PALETA PREMIUM MONOCROMÁTICA (Black Card)
+// 1. O CÉREBRO DA APLICAÇÃO (VIEWMODEL)
 // ==========================================
-val BazaBackground = Color(0xFFF8F9FA) // Off-white muito limpo e sofisticado
-val BazaDark = Color(0xFF121212)       // Preto "fosco" (reduz o cansaço visual)
-val BazaAccent = Color.Black           // Preto puro para botões e contrastes absolutos
-val BazaInputBg = Color(0xFFEBEBEB)    // Cinza quase branco para os campos de texto
+class BazaViewModel : ViewModel() {
 
-var saldoGlobal by mutableStateOf(5000.00) // Vai ser atualizado dinamicamente!
+    private val _saldo = MutableStateFlow(0.0)
+    val saldo: StateFlow<Double> = _saldo.asStateFlow()
 
+    private val _extrato = MutableStateFlow<List<TransacaoExtrato>>(emptyList())
+    val extrato: StateFlow<List<TransacaoExtrato>> = _extrato.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+
+    private val _mensagemErro = MutableStateFlow("")
+    val mensagemErro: StateFlow<String> = _mensagemErro.asStateFlow()
+
+    fun limparErro() { _mensagemErro.value = "" }
+
+    fun login(cpf: String, senha: String, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _mensagemErro.value = ""
+            try {
+                val resposta = RedeBazaBank.api.login(AuthRequest(cpf, senha))
+                SessaoApp.tokenJwt = resposta.token
+                onSuccess()
+            } catch (e: Exception) {
+                _mensagemErro.value = "❌ CPF ou senha inválidos."
+            } finally { _isLoading.value = false }
+        }
+    }
+
+    fun registrar(cpf: String, senha: String, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _mensagemErro.value = ""
+            try {
+                val resposta = RedeBazaBank.api.registrar(AuthRequest(cpf, senha))
+                if (resposta.isSuccessful) {
+                    onSuccess()
+                } else {
+                    _mensagemErro.value = "⚠️ CPF já registado ou dados inválidos."
+                }
+            } catch (e: Exception) {
+                _mensagemErro.value = "❌ Erro de conexão com o banco."
+            } finally { _isLoading.value = false }
+        }
+    }
+
+    fun atualizarHome() {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val conta = RedeBazaBank.api.buscarConta(SessaoApp.contaIdAtual)
+                _saldo.value = conta.saldo
+            } catch (e: Exception) {
+                _mensagemErro.value = "Erro ao buscar dados."
+            } finally { _isLoading.value = false }
+        }
+    }
+
+    fun buscarExtrato() {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                val transacoes = RedeBazaBank.api.buscarExtrato(SessaoApp.contaIdAtual)
+                _extrato.value = transacoes
+            } catch (e: Exception) {
+                _mensagemErro.value = "Erro ao carregar extrato."
+            } finally { _isLoading.value = false }
+        }
+    }
+
+    fun transferir(chaveDestino: String, valor: Double, onSuccess: () -> Unit) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _mensagemErro.value = ""
+            try {
+                val pedido = TransferenciaRequest(SessaoApp.contaIdAtual, chaveDestino, valor)
+                val resposta = RedeBazaBank.api.transferir(pedido)
+                if (resposta.status == "SUCESSO") {
+                    atualizarHome() // Rebusca o saldo real do servidor após o PIX!
+                    onSuccess()
+                }
+            } catch (e: Exception) {
+                _mensagemErro.value = "❌ Erro ao enviar PIX."
+            } finally { _isLoading.value = false }
+        }
+    }
+}
+
+// ==========================================
+// 2. TEMA E CORES
+// ==========================================
+val BazaBackground = Color(0xFFF8F9FA)
+val BazaDark = Color(0xFF121212)
+val BazaAccent = Color.Black
+val BazaInputBg = Color(0xFFEBEBEB)
+
+// ==========================================
+// 3. NAVEGAÇÃO PRINCIPAL E MAIN ACTIVITY
+// ==========================================
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
             BazaBankAppTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = BazaBackground) {
-                    BazaBankNavegacao()
+                    val viewModel: BazaViewModel = viewModel() // Injeta o ViewModel
+                    BazaBankNavegacao(viewModel)
                 }
             }
         }
@@ -65,60 +164,48 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun BazaBankNavegacao() {
+fun BazaBankNavegacao(viewModel: BazaViewModel) {
     val navController = rememberNavController()
+
+    // Observador de segurança: expulsa para o login se o token expirar (Erro 401)
+    LaunchedEffect(Unit) {
+        SessaoApp.eventoSessaoExpirada.collect { expirou ->
+            if (expirou) {
+                navController.navigate("login") {
+                    popUpTo(0) { inclusive = true } // Limpa a pilha de navegação
+                }
+            }
+        }
+    }
+
     NavHost(navController = navController, startDestination = "login") {
-        composable("login") { EcraLogin(navController) }
-        composable("registro") { EcraRegistro(navController) }
-        composable("home") { EcraHome(navController) }
-        composable("transferencia") { EcraTransferencia(navController) }
-        composable("extrato") { EcraExtrato(navController) } // Nova rota do Extrato!
+        composable("login") { EcraLogin(navController, viewModel) }
+        composable("registro") { EcraRegistro(navController, viewModel) }
+        composable("home") { EcraHome(navController, viewModel) }
+        composable("transferencia") { EcraTransferencia(navController, viewModel) }
+        composable("extrato") { EcraExtrato(navController, viewModel) }
     }
 }
 
 // ==========================================
-// COMPONENTES REUTILIZÁVEIS
+// 4. TELAS DA APLICAÇÃO (UI LIMPA)
 // ==========================================
-@Composable
-fun BazaTextField(value: String, onValueChange: (String) -> Unit, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, isPassword: Boolean = false, isNumeric: Boolean = false, readOnly: Boolean = false) {
-    TextField(
-        value = value,
-        onValueChange = onValueChange,
-        label = { Text(label, color = Color.Gray) },
-        readOnly = readOnly,
-        leadingIcon = icon?.let { { Icon(it, contentDescription = null, tint = BazaDark) } },
-        visualTransformation = if (isPassword) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
-        keyboardOptions = if (isNumeric) KeyboardOptions(keyboardType = KeyboardType.Decimal) else KeyboardOptions.Default,
-        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)),
-        colors = TextFieldDefaults.colors(
-            focusedContainerColor = Color.White,
-            unfocusedContainerColor = BazaInputBg,
-            focusedIndicatorColor = Color.Transparent,
-            unfocusedIndicatorColor = Color.Transparent,
-            focusedTextColor = BazaDark,
-            unfocusedTextColor = BazaDark
-        ),
-        singleLine = true
-    )
-}
 
-// ==========================================
-// 1. PÁGINA DE LOGIN
-// ==========================================
 @Composable
-fun EcraLogin(navController: NavController) {
+fun EcraLogin(navController: NavController, viewModel: BazaViewModel) {
     var cpf by remember { mutableStateOf("") }
     var senha by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    var mensagemErro by remember { mutableStateOf("") }
-    val coroutineScope = rememberCoroutineScope()
+
+    val isLoading by viewModel.isLoading.collectAsState()
+    val erro by viewModel.mensagemErro.collectAsState()
+
+    LaunchedEffect(Unit) { viewModel.limparErro() }
 
     Column(
         modifier = Modifier.fillMaxSize().padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
-        // ... (Mantenha o Logo e os Textos Iniciais) ...
         Box(modifier = Modifier.size(72.dp).clip(CircleShape).background(BazaAccent), contentAlignment = Alignment.Center) {
             Icon(Icons.Outlined.Home, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
         }
@@ -134,32 +221,20 @@ fun EcraLogin(navController: NavController) {
 
         Spacer(modifier = Modifier.height(32.dp))
 
-        if (mensagemErro.isNotEmpty()) {
-            Text(mensagemErro, color = Color(0xFFDC2626), modifier = Modifier.padding(bottom = 16.dp))
+        if (erro.isNotEmpty()) {
+            Text(erro, color = Color(0xFFDC2626), modifier = Modifier.padding(bottom = 16.dp), fontWeight = FontWeight.Bold)
         }
 
         Button(
             onClick = {
-                coroutineScope.launch {
-                    isLoading = true
-                    mensagemErro = ""
-                    try {
-                        // 1. Faz o Login Real
-                        val resposta = RedeBazaBank.api.login(AuthRequest(cpf, senha))
-                        // 2. Guarda o Crachá na Sessão!
-                        SessaoApp.tokenJwt = resposta.token
-                        // 3. Libera o acesso
-                        navController.navigate("home")
-                    } catch (e: Exception) {
-                        mensagemErro = "❌ CPF ou senha inválidos."
-                    } finally { isLoading = false }
+                viewModel.login(cpf, senha) {
+                    navController.navigate("home") { popUpTo("login") { inclusive = true } }
                 }
             },
             modifier = Modifier.fillMaxWidth().height(60.dp),
             colors = ButtonDefaults.buttonColors(containerColor = BazaAccent),
             shape = RoundedCornerShape(16.dp),
-            elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp),
-            enabled = !isLoading
+            enabled = !isLoading && cpf.isNotBlank() && senha.isNotBlank()
         ) {
             if (isLoading) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(28.dp))
             else Text("Acessar a minha conta", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -172,20 +247,18 @@ fun EcraLogin(navController: NavController) {
     }
 }
 
-// ==========================================
-// 2. PÁGINA DE REGISTRO
-// ==========================================
 @Composable
-fun EcraRegistro(navController: NavController) {
-    var nome by remember { mutableStateOf("") }
+fun EcraRegistro(navController: NavController, viewModel: BazaViewModel) {
     var cpf by remember { mutableStateOf("") }
     var senha by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    var mensagem by remember { mutableStateOf("") }
-    val coroutineScope = rememberCoroutineScope()
+    var sucessoMsg by remember { mutableStateOf("") }
+
+    val isLoading by viewModel.isLoading.collectAsState()
+    val erro by viewModel.mensagemErro.collectAsState()
+
+    LaunchedEffect(Unit) { viewModel.limparErro() }
 
     Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
-        // ... (Mantenha os cabeçalhos visuais iguais) ...
         Spacer(modifier = Modifier.height(24.dp))
         IconButton(onClick = { navController.popBackStack() }, modifier = Modifier.offset(x = (-12).dp)) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = BazaDark)
@@ -196,40 +269,25 @@ fun EcraRegistro(navController: NavController) {
 
         Spacer(modifier = Modifier.height(40.dp))
 
-        BazaTextField(value = nome, onValueChange = { nome = it }, label = "Como quer ser chamado?")
-        Spacer(modifier = Modifier.height(16.dp))
         BazaTextField(value = cpf, onValueChange = { cpf = it }, label = "Seu CPF")
         Spacer(modifier = Modifier.height(16.dp))
         BazaTextField(value = senha, onValueChange = { senha = it }, label = "Crie uma senha forte", isPassword = true)
 
         Spacer(modifier = Modifier.weight(1f))
 
-        if (mensagem.isNotEmpty()) {
-            Text(mensagem, color = if (mensagem.contains("Sucesso")) Color(0xFF059669) else Color(0xFFDC2626), modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp))
-        }
+        if (erro.isNotEmpty()) Text(erro, color = Color(0xFFDC2626), modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp))
+        if (sucessoMsg.isNotEmpty()) Text(sucessoMsg, color = Color(0xFF059669), modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp), fontWeight = FontWeight.Bold)
 
         Button(
             onClick = {
-                coroutineScope.launch {
-                    isLoading = true
-                    try {
-                        val resposta = RedeBazaBank.api.registrar(AuthRequest(cpf, senha))
-                        if (resposta.isSuccessful) {
-                            mensagem = "✅ Sucesso! Voltando para o login..."
-                            delay(1500)
-                            navController.popBackStack()
-                        } else {
-                            mensagem = "⚠️ CPF já registado ou erro nos dados."
-                        }
-                    } catch (e: Exception) {
-                        mensagem = "❌ Erro de conexão com o banco."
-                    } finally { isLoading = false }
+                viewModel.registrar(cpf, senha) {
+                    sucessoMsg = "✅ Sucesso! Pode fazer o Login."
                 }
             },
             modifier = Modifier.fillMaxWidth().height(60.dp),
             colors = ButtonDefaults.buttonColors(containerColor = BazaAccent),
             shape = RoundedCornerShape(16.dp),
-            enabled = !isLoading
+            enabled = !isLoading && cpf.isNotBlank() && senha.isNotBlank()
         ) {
             if (isLoading) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(28.dp))
             else Text("Finalizar Cadastro", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
@@ -238,27 +296,14 @@ fun EcraRegistro(navController: NavController) {
     }
 }
 
-// ==========================================
-// 3. PÁGINA HOME (Agora Sincronizada com o Banco!)
-// ==========================================
 @Composable
-fun EcraHome(navController: NavController) {
-    var isLoadingSaldo by remember { mutableStateOf(true) }
+fun EcraHome(navController: NavController, viewModel: BazaViewModel) {
+    val saldo by viewModel.saldo.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
 
-    // Vai buscar o saldo real ao Spring Boot quando a página abre
-    LaunchedEffect(Unit) {
-        try {
-            val respostaConta = RedeBazaBank.api.buscarConta("11111111-1111-1111-1111-111111111111")
-            saldoGlobal = respostaConta.saldo
-        } catch (e: Exception) {
-            println("Erro ao buscar saldo: ${e.message}")
-        } finally {
-            isLoadingSaldo = false
-        }
-    }
+    LaunchedEffect(Unit) { viewModel.atualizarHome() }
 
     Column(modifier = Modifier.fillMaxSize()) {
-
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 48.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -269,40 +314,37 @@ fun EcraHome(navController: NavController) {
                 Spacer(modifier = Modifier.width(12.dp))
                 Column {
                     Text("Olá,", fontSize = 14.sp, color = Color.Gray)
-                    Text("Allan Silva", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = BazaDark)
+                    Text("Investidor", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = BazaDark)
                 }
             }
-            IconButton(onClick = { navController.navigate("login") }) {
+            IconButton(onClick = {
+                SessaoApp.encerrarSessao() // Dispara o evento de logoff
+            }) {
                 Icon(Icons.Outlined.Notifications, contentDescription = "Sair", tint = BazaDark)
             }
         }
 
-        // Cartão de Saldo
         Card(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).height(200.dp),
             shape = RoundedCornerShape(24.dp),
             elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
         ) {
-            Box(
-                modifier = Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF222222), Color.Black)))
-            ) {
+            Box(modifier = Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF222222), Color.Black)))) {
                 Column(modifier = Modifier.padding(24.dp).fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Saldo Disponível", color = Color.LightGray, fontSize = 14.sp)
                         Icon(Icons.Outlined.CreditCard, contentDescription = null, tint = Color.LightGray)
                     }
-
-                    if (isLoadingSaldo) {
+                    if (isLoading && saldo == 0.0) {
                         CircularProgressIndicator(color = Color.White, modifier = Modifier.size(32.dp))
                     } else {
-                        Text("R$ ${String.format("%.2f", saldoGlobal)}", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                        Text("R$ ${String.format("%.2f", saldo)}", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
                     }
                 }
             }
         }
 
         Spacer(modifier = Modifier.height(36.dp))
-
         Text("Ações Rápidas", modifier = Modifier.padding(horizontal = 24.dp), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = BazaDark)
         Spacer(modifier = Modifier.height(20.dp))
 
@@ -311,38 +353,24 @@ fun EcraHome(navController: NavController) {
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             QuickActionButton(icon = Icons.AutoMirrored.Filled.Send, label = "Área PIX", onClick = { navController.navigate("transferencia") })
-            // O botão de Cartões agora vai para o EXTRATO
             QuickActionButton(icon = Icons.Outlined.CreditCard, label = "Extrato", onClick = { navController.navigate("extrato") })
-            QuickActionButton(icon = Icons.Outlined.Home, label = "Investir", onClick = { })
+            QuickActionButton(icon = Icons.Outlined.Home, label = "Atualizar", onClick = { viewModel.atualizarHome() })
             QuickActionButton(icon = Icons.Default.Person, label = "Perfil", onClick = { })
         }
     }
 }
 
-@Composable
-fun QuickActionButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick)) {
-        Box(
-            modifier = Modifier.size(64.dp).clip(CircleShape).background(Color.White),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(icon, contentDescription = label, tint = BazaDark, modifier = Modifier.size(28.dp))
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = BazaDark)
-    }
-}
-
-// ==========================================
-// 4. PÁGINA DE TRANSFERÊNCIA
-// ==========================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EcraTransferencia(navController: NavController) {
+fun EcraTransferencia(navController: NavController, viewModel: BazaViewModel) {
     var valorInput by remember { mutableStateOf("") }
-    var isLoading by remember { mutableStateOf(false) }
-    var mensagemFeedback by remember { mutableStateOf("") }
-    val coroutineScope = rememberCoroutineScope()
+    var sucessoMsg by remember { mutableStateOf("") }
+
+    val saldo by viewModel.saldo.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
+    val erro by viewModel.mensagemErro.collectAsState()
+
+    LaunchedEffect(Unit) { viewModel.limparErro() }
 
     Column(modifier = Modifier.fillMaxSize()) {
         TopAppBar(
@@ -356,7 +384,6 @@ fun EcraTransferencia(navController: NavController) {
         )
 
         Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
-
             Text("Quanto deseja transferir?", fontSize = 16.sp, color = Color.Gray, fontWeight = FontWeight.Medium)
             TextField(
                 value = valorInput,
@@ -365,85 +392,52 @@ fun EcraTransferencia(navController: NavController) {
                 placeholder = { Text("R$ 0.00", fontSize = 48.sp, fontWeight = FontWeight.ExtraBold, color = Color.LightGray) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent,
-                    unfocusedContainerColor = Color.Transparent,
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent
+                    focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent
                 ),
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Text("Seu saldo: R$ ${String.format("%.2f", saldoGlobal)}", color = Color.Gray, fontSize = 14.sp)
+            Text("Seu saldo: R$ ${String.format("%.2f", saldo)}", color = Color.Gray, fontSize = 14.sp)
             Spacer(modifier = Modifier.height(32.dp))
 
             BazaTextField(value = "22222222-2222-2222-2222-222222222222", onValueChange = {}, label = "Chave de Destino", readOnly = true)
 
             Spacer(modifier = Modifier.weight(1f))
 
-            if (mensagemFeedback.isNotEmpty()) {
-                Text(
-                    text = mensagemFeedback,
-                    color = if (mensagemFeedback.contains("✅")) Color(0xFF059669) else Color(0xFFDC2626),
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp)
-                )
-            }
+            if (erro.isNotEmpty()) Text(erro, color = Color(0xFFDC2626), modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp))
+            if (sucessoMsg.isNotEmpty()) Text(sucessoMsg, color = Color(0xFF059669), modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp), fontWeight = FontWeight.Bold)
 
             Button(
                 onClick = {
                     val valor = valorInput.toDoubleOrNull()
-                    if (valor != null && valor > 0 && valor <= saldoGlobal) {
-                        coroutineScope.launch {
-                            isLoading = true
-                            try {
-                                val pedido = TransferenciaRequest("11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222", valor)
-                                val resposta = RedeBazaBank.api.transferir(pedido)
-                                if (resposta.status == "SUCESSO") {
-                                    saldoGlobal -= valor
-                                    mensagemFeedback = "✅ PIX Enviado!"
-                                    delay(1000)
-                                    navController.popBackStack() // Volta para a Home
-                                }
-                            } catch (e: Exception) {
-                                mensagemFeedback = "❌ Erro de rede"
-                            } finally { isLoading = false }
+                    if (valor != null && valor > 0 && valor <= saldo) {
+                        viewModel.transferir("22222222-2222-2222-2222-222222222222", valor) {
+                            sucessoMsg = "✅ PIX Enviado com Sucesso!"
+                            valorInput = ""
                         }
-                    } else {
-                        mensagemFeedback = "⚠️ Valor inválido."
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(60.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = BazaAccent),
                 shape = RoundedCornerShape(16.dp),
-                enabled = !isLoading
+                enabled = !isLoading && valorInput.isNotBlank()
             ) {
-                if (isLoading) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(28.dp)) else Text("Confirmar Transferência", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                if (isLoading) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(28.dp))
+                else Text("Confirmar Transferência", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }
 
-// ==========================================
-// 5. PÁGINA DE EXTRATO (LazyColumn de Alta Performance)
-// ==========================================
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun EcraExtrato(navController: NavController) {
-    var transacoes by remember { mutableStateOf<List<TransacaoExtrato>>(emptyList()) }
-    var isLoading by remember { mutableStateOf(true) }
+fun EcraExtrato(navController: NavController, viewModel: BazaViewModel) {
+    val transacoes by viewModel.extrato.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
 
-    val minhaContaId = "11111111-1111-1111-1111-111111111111"
-
-    LaunchedEffect(Unit) {
-        try {
-            transacoes = RedeBazaBank.api.buscarExtrato(minhaContaId)
-        } catch (e: Exception) {
-            println("Erro ao carregar extrato: ${e.message}")
-        } finally {
-            isLoading = false
-        }
-    }
+    LaunchedEffect(Unit) { viewModel.buscarExtrato() }
 
     Column(modifier = Modifier.fillMaxSize().background(BazaBackground)) {
         TopAppBar(
@@ -465,14 +459,13 @@ fun EcraExtrato(navController: NavController) {
                 Text("Sem movimentos recentes.", color = Color.Gray)
             }
         } else {
-            // A Mágica da Performance: LazyColumn
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(24.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 items(transacoes) { transacao ->
-                    val isSaida = transacao.contaOrigemId == minhaContaId
+                    val isSaida = transacao.contaOrigemId == SessaoApp.contaIdAtual
 
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -517,24 +510,32 @@ fun EcraExtrato(navController: NavController) {
 }
 
 // ==========================================
-// PREVIEWS
+// COMPONENTES AUXILIARES
 // ==========================================
-@Preview(showBackground = true, showSystemUi = true, name = "1. Login")
 @Composable
-fun LoginPreview() { BazaBankAppTheme { EcraLogin(rememberNavController()) } }
+fun BazaTextField(value: String, onValueChange: (String) -> Unit, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, isPassword: Boolean = false, isNumeric: Boolean = false, readOnly: Boolean = false) {
+    TextField(
+        value = value, onValueChange = onValueChange, label = { Text(label, color = Color.Gray) }, readOnly = readOnly,
+        leadingIcon = icon?.let { { Icon(it, contentDescription = null, tint = BazaDark) } },
+        visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
+        keyboardOptions = if (isNumeric) KeyboardOptions(keyboardType = KeyboardType.Decimal) else KeyboardOptions.Default,
+        modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)),
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = Color.White, unfocusedContainerColor = BazaInputBg,
+            focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+            focusedTextColor = BazaDark, unfocusedTextColor = BazaDark
+        ),
+        singleLine = true
+    )
+}
 
-@Preview(showBackground = true, showSystemUi = true, name = "2. Registro")
 @Composable
-fun RegistroPreview() { BazaBankAppTheme { EcraRegistro(rememberNavController()) } }
-
-@Preview(showBackground = true, showSystemUi = true, name = "3. Home")
-@Composable
-fun HomePreview() { BazaBankAppTheme { EcraHome(rememberNavController()) } }
-
-@Preview(showBackground = true, showSystemUi = true, name = "4. Transferência")
-@Composable
-fun TransferenciaPreview() { BazaBankAppTheme { EcraTransferencia(rememberNavController()) } }
-
-@Preview(showBackground = true, showSystemUi = true, name = "5. Extrato")
-@Composable
-fun ExtratoPreview() { BazaBankAppTheme { EcraExtrato(rememberNavController()) } }
+fun QuickActionButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick)) {
+        Box(modifier = Modifier.size(64.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = label, tint = BazaDark, modifier = Modifier.size(28.dp))
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(label, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, color = BazaDark)
+    }
+}
