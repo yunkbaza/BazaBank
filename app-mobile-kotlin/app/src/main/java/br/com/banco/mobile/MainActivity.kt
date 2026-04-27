@@ -126,7 +126,7 @@ class BazaViewModel : ViewModel() {
             _mensagemErro.value = ""
             try {
                 val pedido = TransferenciaRequest(SessaoApp.contaIdAtual, chaveDestino, valor)
-                val resposta = RedeBazaBank.api.transferir(pedido)
+                val resposta = RedeBazaBank.api.transferir(java.util.UUID.randomUUID().toString(), pedido)
                 if (resposta.status == "SUCESSO") {
                     atualizarHome() // Rebusca o saldo real do servidor após o PIX!
                     onSuccess()
