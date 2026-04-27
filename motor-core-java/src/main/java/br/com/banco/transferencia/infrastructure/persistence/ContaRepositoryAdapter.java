@@ -2,7 +2,10 @@ package br.com.banco.transferencia.infrastructure.persistence;
 
 import br.com.banco.transferencia.application.ports.out.ContaRepositoryPort;
 import br.com.banco.transferencia.domain.Conta;
+import br.com.banco.transferencia.domain.SaldoInsuficienteException;
+import br.com.banco.transferencia.domain.ValorInvalidoException;
 import org.springframework.stereotype.Repository;
+
 
 import java.util.Optional;
 import java.util.UUID;

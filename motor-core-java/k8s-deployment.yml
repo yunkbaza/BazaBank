@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: motor-app
-          image: motor-transferencia:latest
+          image: motor-app:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080
@@ -27,3 +27,7 @@ spec:
               value: "root"
             - name: SPRING_DATASOURCE_PASSWORD
               value: "123"
+            - name: KAFKA_URL  # <-- CORREÇÃO: Apontando a injeção do properties para a rede do K8s
+              value: "kafka-service:9092"
+            - name: REDIS_HOST
+              value: "redis-service"

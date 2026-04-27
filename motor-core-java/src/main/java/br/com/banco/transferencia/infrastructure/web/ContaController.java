@@ -4,6 +4,8 @@ import br.com.banco.transferencia.application.ports.out.ContaRepositoryPort;
 import br.com.banco.transferencia.domain.Conta;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import br.com.banco.transferencia.domain.SaldoInsuficienteException;
+import br.com.banco.transferencia.domain.ValorInvalidoException;
 
 import java.util.Optional;
 import java.util.UUID;
