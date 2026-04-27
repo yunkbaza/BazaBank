@@ -1,60 +1,51 @@
 package br.com.banco.transferencia.application.usecases;
 
-import br.com.banco.transferencia.application.ports.out.ContaRepositoryPort;
-import br.com.banco.transferencia.application.ports.out.TransacaoRepositoryPort;
-import br.com.banco.transferencia.application.ports.out.TransferenciaEventPublisherPort;
-import br.com.banco.transferencia.domain.Conta;
-import br.com.banco.transferencia.domain.Transacao;
-import br.com.banco.transferencia.domain.events.TransferenciaRealizadaEvent;
+import br.com.banco.transferencia.application.ports.out.*;
+import br.com.banco.transferencia.domain.*;
 import org.springframework.transaction.annotation.Transactional;
-
 import java.math.BigDecimal;
 import java.util.UUID;
 
 public class RealizarTransferenciaUseCase {
-
     private final ContaRepositoryPort contaRepository;
     private final TransacaoRepositoryPort transacaoRepository;
     private final TransferenciaEventPublisherPort eventPublisher;
 
-    public RealizarTransferenciaUseCase(
-            ContaRepositoryPort contaRepository,
-            TransacaoRepositoryPort transacaoRepository,
-            TransferenciaEventPublisherPort eventPublisher) {
-        this.contaRepository = contaRepository;
-        this.transacaoRepository = transacaoRepository;
-        this.eventPublisher = eventPublisher;
+    public RealizarTransferenciaUseCase(ContaRepositoryPort c, TransacaoRepositoryPort t, TransferenciaEventPublisherPort e) {
+        this.contaRepository = c;
+        this.transacaoRepository = t;
+        this.eventPublisher = e;
     }
 
     @Transactional
     public Transacao executar(UUID origemId, UUID destinoId, BigDecimal valor) {
+        if (origemId.equals(destinoId)) throw new IllegalArgumentException("Contas iguais");
 
-        Conta origem = contaRepository.buscarPorIdComLock(origemId)
-                .orElseThrow(() -> new IllegalArgumentException("Conta de origem não encontrada."));
+        // - Ordenação de UUIDs para evitar Deadlock em transferências simultâneas
+        Conta origem, destino;
+        if (origemId.compareTo(destinoId) < 0) {
+            origem = buscarComLock(origemId);
+            destino = buscarComLock(destinoId);
+        } else {
+            destino = buscarComLock(destinoId);
+            origem = buscarComLock(origemId);
+        }
 
-        Conta destino = contaRepository.buscarPorIdComLock(destinoId)
-                .orElseThrow(() -> new IllegalArgumentException("Conta de destino não encontrada."));
+        origem.debitar(valor);
+        destino.creditar(valor);
 
         Transacao transacao = new Transacao(UUID.randomUUID(), origemId, destinoId, valor);
-
-        try {
-            origem.debitar(valor);
-            destino.creditar(valor);
-            transacao.completar();
-        } catch (Exception e) {
-            transacao.falhar();
-            transacaoRepository.salvar(transacao);
-            throw e;
-        }
+        transacao.completar();
 
         contaRepository.salvar(origem);
         contaRepository.salvar(destino);
         transacaoRepository.salvar(transacao);
 
-        eventPublisher.publicar(new TransferenciaRealizadaEvent(
-                transacao.getId(), origem.getId(), destino.getId(), valor
-        ));
-
         return transacao;
+    }
+
+    private Conta buscarComLock(UUID id) {
+        return contaRepository.buscarPorIdComLock(id)
+                .orElseThrow(() -> new IllegalArgumentException("Conta não encontrada: " + id));
     }
 }
