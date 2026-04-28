@@ -38,6 +38,12 @@ data class TransacaoExtrato(val id: String, val contaOrigemId: String, val conta
 // 3. INTERFACE DA API
 // ==========================================
 interface BazaBankApiService {
+    @POST("/api/transferencias")
+    suspend fun transferir(
+        @Header("Idempotency-Key") idempotencyKey: String, // <-- NOVO CÓDIGO
+        @Body request: TransferenciaRequest
+    ): TransacaoResponse
+
     @POST("/api/auth/registrar")
     suspend fun registrar(@Body request: AuthRequest): Response<Void>
 
@@ -58,7 +64,7 @@ interface BazaBankApiService {
 // 4. CLIENTE RETROFIT CONFIGURADO
 // ==========================================
 object RedeBazaBank {
-    private const val BASE_URL = "http://10.0.2.2:8081"
+    private const val BASE_URL = "http://10.0.2.2"
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)

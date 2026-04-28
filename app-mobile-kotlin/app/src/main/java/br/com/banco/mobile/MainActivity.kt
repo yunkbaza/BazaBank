@@ -8,9 +8,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -27,7 +30,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -50,7 +55,6 @@ import br.com.banco.mobile.ui.theme.BazaBankAppTheme
 // 1. O CÉREBRO DA APLICAÇÃO (VIEWMODEL)
 // ==========================================
 class BazaViewModel : ViewModel() {
-
     private val _saldo = MutableStateFlow(0.0)
     val saldo: StateFlow<Double> = _saldo.asStateFlow()
 
@@ -126,9 +130,10 @@ class BazaViewModel : ViewModel() {
             _mensagemErro.value = ""
             try {
                 val pedido = TransferenciaRequest(SessaoApp.contaIdAtual, chaveDestino, valor)
-                val resposta = RedeBazaBank.api.transferir(pedido)
+                // Usando a chave de Idempotência!
+                val resposta = RedeBazaBank.api.transferir(java.util.UUID.randomUUID().toString(), pedido)
                 if (resposta.status == "SUCESSO") {
-                    atualizarHome() // Rebusca o saldo real do servidor após o PIX!
+                    atualizarHome()
                     onSuccess()
                 }
             } catch (e: Exception) {
@@ -155,7 +160,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             BazaBankAppTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = BazaBackground) {
-                    val viewModel: BazaViewModel = viewModel() // Injeta o ViewModel
+                    val viewModel: BazaViewModel = viewModel()
                     BazaBankNavegacao(viewModel)
                 }
             }
@@ -167,12 +172,11 @@ class MainActivity : ComponentActivity() {
 fun BazaBankNavegacao(viewModel: BazaViewModel) {
     val navController = rememberNavController()
 
-    // Observador de segurança: expulsa para o login se o token expirar (Erro 401)
     LaunchedEffect(Unit) {
         SessaoApp.eventoSessaoExpirada.collect { expirou ->
             if (expirou) {
                 navController.navigate("login") {
-                    popUpTo(0) { inclusive = true } // Limpa a pilha de navegação
+                    popUpTo(0) { inclusive = true }
                 }
             }
         }
@@ -188,7 +192,7 @@ fun BazaBankNavegacao(viewModel: BazaViewModel) {
 }
 
 // ==========================================
-// 4. TELAS DA APLICAÇÃO (UI LIMPA)
+// 4. TELAS DA APLICAÇÃO (COM PROTEÇÃO ANTI-FREEZE)
 // ==========================================
 
 @Composable
@@ -198,14 +202,19 @@ fun EcraLogin(navController: NavController, viewModel: BazaViewModel) {
 
     val isLoading by viewModel.isLoading.collectAsState()
     val erro by viewModel.mensagemErro.collectAsState()
+    val scrollState = rememberScrollState() // SÊNIOR: Gestão de Rolagem para o teclado não travar
 
     LaunchedEffect(Unit) { viewModel.limparErro() }
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(32.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState) // Aplicação do Scroll
+            .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        Spacer(modifier = Modifier.height(48.dp))
         Box(modifier = Modifier.size(72.dp).clip(CircleShape).background(BazaAccent), contentAlignment = Alignment.Center) {
             Icon(Icons.Outlined.Home, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
         }
@@ -244,6 +253,7 @@ fun EcraLogin(navController: NavController, viewModel: BazaViewModel) {
         TextButton(onClick = { navController.navigate("registro") }) {
             Text("Abrir uma conta BazaBank", color = BazaDark, fontWeight = FontWeight.Bold)
         }
+        Spacer(modifier = Modifier.height(48.dp)) // Espaço extra para o teclado não tapar o botão
     }
 }
 
@@ -255,10 +265,11 @@ fun EcraRegistro(navController: NavController, viewModel: BazaViewModel) {
 
     val isLoading by viewModel.isLoading.collectAsState()
     val erro by viewModel.mensagemErro.collectAsState()
+    val scrollState = rememberScrollState()
 
     LaunchedEffect(Unit) { viewModel.limparErro() }
 
-    Column(modifier = Modifier.fillMaxSize().padding(32.dp)) {
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(32.dp)) {
         Spacer(modifier = Modifier.height(24.dp))
         IconButton(onClick = { navController.popBackStack() }, modifier = Modifier.offset(x = (-12).dp)) {
             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = BazaDark)
@@ -273,7 +284,7 @@ fun EcraRegistro(navController: NavController, viewModel: BazaViewModel) {
         Spacer(modifier = Modifier.height(16.dp))
         BazaTextField(value = senha, onValueChange = { senha = it }, label = "Crie uma senha forte", isPassword = true)
 
-        Spacer(modifier = Modifier.weight(1f))
+        Spacer(modifier = Modifier.height(40.dp))
 
         if (erro.isNotEmpty()) Text(erro, color = Color(0xFFDC2626), modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp))
         if (sucessoMsg.isNotEmpty()) Text(sucessoMsg, color = Color(0xFF059669), modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp), fontWeight = FontWeight.Bold)
@@ -300,10 +311,11 @@ fun EcraRegistro(navController: NavController, viewModel: BazaViewModel) {
 fun EcraHome(navController: NavController, viewModel: BazaViewModel) {
     val saldo by viewModel.saldo.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
+    val scrollState = rememberScrollState()
 
     LaunchedEffect(Unit) { viewModel.atualizarHome() }
 
-    Column(modifier = Modifier.fillMaxSize()) {
+    Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
         Row(
             modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 48.dp, bottom = 24.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -317,9 +329,7 @@ fun EcraHome(navController: NavController, viewModel: BazaViewModel) {
                     Text("Investidor", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = BazaDark)
                 }
             }
-            IconButton(onClick = {
-                SessaoApp.encerrarSessao() // Dispara o evento de logoff
-            }) {
+            IconButton(onClick = { SessaoApp.encerrarSessao() }) {
                 Icon(Icons.Outlined.Notifications, contentDescription = "Sair", tint = BazaDark)
             }
         }
@@ -346,17 +356,19 @@ fun EcraHome(navController: NavController, viewModel: BazaViewModel) {
 
         Spacer(modifier = Modifier.height(36.dp))
         Text("Ações Rápidas", modifier = Modifier.padding(horizontal = 24.dp), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = BazaDark)
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
+        // SÊNIOR: Distribuição Proporcional Perfeita dos Botões
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
-            horizontalArrangement = Arrangement.SpaceBetween
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly
         ) {
-            QuickActionButton(icon = Icons.AutoMirrored.Filled.Send, label = "Área PIX", onClick = { navController.navigate("transferencia") })
-            QuickActionButton(icon = Icons.Outlined.CreditCard, label = "Extrato", onClick = { navController.navigate("extrato") })
-            QuickActionButton(icon = Icons.Outlined.Home, label = "Atualizar", onClick = { viewModel.atualizarHome() })
-            QuickActionButton(icon = Icons.Default.Person, label = "Perfil", onClick = { })
+            QuickActionButton(icon = Icons.AutoMirrored.Filled.Send, label = "Área PIX", modifier = Modifier.weight(1f), onClick = { navController.navigate("transferencia") })
+            QuickActionButton(icon = Icons.Outlined.CreditCard, label = "Extrato", modifier = Modifier.weight(1f), onClick = { navController.navigate("extrato") })
+            QuickActionButton(icon = Icons.Outlined.Home, label = "Atualizar", modifier = Modifier.weight(1f), onClick = { viewModel.atualizarHome() })
+            QuickActionButton(icon = Icons.Default.Person, label = "Perfil", modifier = Modifier.weight(1f), onClick = { })
         }
+        Spacer(modifier = Modifier.height(40.dp))
     }
 }
 
@@ -369,6 +381,8 @@ fun EcraTransferencia(navController: NavController, viewModel: BazaViewModel) {
     val saldo by viewModel.saldo.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val erro by viewModel.mensagemErro.collectAsState()
+    val scrollState = rememberScrollState()
+    val focusManager = LocalFocusManager.current // Gestor de fecho de teclado
 
     LaunchedEffect(Unit) { viewModel.limparErro() }
 
@@ -383,14 +397,15 @@ fun EcraTransferencia(navController: NavController, viewModel: BazaViewModel) {
             colors = TopAppBarDefaults.topAppBarColors(containerColor = BazaBackground)
         )
 
-        Column(modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)) {
+        Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(horizontal = 24.dp, vertical = 16.dp)) {
             Text("Quanto deseja transferir?", fontSize = 16.sp, color = Color.Gray, fontWeight = FontWeight.Medium)
             TextField(
                 value = valorInput,
                 onValueChange = { valorInput = it },
                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 48.sp, fontWeight = FontWeight.ExtraBold, color = BazaDark),
                 placeholder = { Text("R$ 0.00", fontSize = 48.sp, fontWeight = FontWeight.ExtraBold, color = Color.LightGray) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }), // Baixa o teclado sozinho
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
                     focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent
@@ -403,13 +418,14 @@ fun EcraTransferencia(navController: NavController, viewModel: BazaViewModel) {
 
             BazaTextField(value = "22222222-2222-2222-2222-222222222222", onValueChange = {}, label = "Chave de Destino", readOnly = true)
 
-            Spacer(modifier = Modifier.weight(1f))
+            Spacer(modifier = Modifier.height(40.dp))
 
             if (erro.isNotEmpty()) Text(erro, color = Color(0xFFDC2626), modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp))
             if (sucessoMsg.isNotEmpty()) Text(sucessoMsg, color = Color(0xFF059669), modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp), fontWeight = FontWeight.Bold)
 
             Button(
                 onClick = {
+                    focusManager.clearFocus()
                     val valor = valorInput.toDoubleOrNull()
                     if (valor != null && valor > 0 && valor <= saldo) {
                         viewModel.transferir("22222222-2222-2222-2222-222222222222", valor) {
@@ -514,11 +530,16 @@ fun EcraExtrato(navController: NavController, viewModel: BazaViewModel) {
 // ==========================================
 @Composable
 fun BazaTextField(value: String, onValueChange: (String) -> Unit, label: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, isPassword: Boolean = false, isNumeric: Boolean = false, readOnly: Boolean = false) {
+    val focusManager = LocalFocusManager.current
     TextField(
         value = value, onValueChange = onValueChange, label = { Text(label, color = Color.Gray) }, readOnly = readOnly,
         leadingIcon = icon?.let { { Icon(it, contentDescription = null, tint = BazaDark) } },
         visualTransformation = if (isPassword) PasswordVisualTransformation() else VisualTransformation.None,
-        keyboardOptions = if (isNumeric) KeyboardOptions(keyboardType = KeyboardType.Decimal) else KeyboardOptions.Default,
+        keyboardOptions = KeyboardOptions(
+            keyboardType = if (isNumeric) KeyboardType.Decimal else KeyboardType.Text,
+            imeAction = ImeAction.Done
+        ),
+        keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
         modifier = Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)),
         colors = TextFieldDefaults.colors(
             focusedContainerColor = Color.White, unfocusedContainerColor = BazaInputBg,
@@ -530,8 +551,11 @@ fun BazaTextField(value: String, onValueChange: (String) -> Unit, label: String,
 }
 
 @Composable
-fun QuickActionButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onClick: () -> Unit) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.clickable(onClick = onClick)) {
+fun QuickActionButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier.clickable(onClick = onClick).padding(vertical = 8.dp) // SÊNIOR: Hitbox maior e organizada
+    ) {
         Box(modifier = Modifier.size(64.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = label, tint = BazaDark, modifier = Modifier.size(28.dp))
         }
