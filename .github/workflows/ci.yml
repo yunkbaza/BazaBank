@@ -10,6 +10,13 @@ jobs:
   test-and-analyze:
     name: 🧪 Testes e Validação
     runs-on: ubuntu-latest
+    
+    # Esta configuração diz ao Github que todos os comandos 'run' 
+    # deste job devem acontecer dentro da pasta do backend!
+    defaults:
+      run:
+        working-directory: ./motor-core-java
+
     steps:
       - name: 📥 Baixar o código do repositório
         uses: actions/checkout@v4
@@ -17,20 +24,24 @@ jobs:
       - name: ☕ Configurar o Java 21
         uses: actions/setup-java@v4
         with:
-          java-version: '21' # Corrigido para bater com o pom.xml
+          java-version: '21'
           distribution: 'temurin'
           cache: 'maven'
 
       - name: 🚀 Executar Testes Unitários e de Integração (Testcontainers)
-        # Retirado o -DskipTests. O GitHub Actions rodará o Docker em background para os Testcontainers!
         run: mvn clean verify
 
   build-and-push-aws:
     name: 🐳 Build e Deploy AWS ECR
-    needs: test-and-analyze # Esta etapa só roda se os testes passarem!
+    needs: test-and-analyze
     runs-on: ubuntu-latest
-    # Só faz push para a AWS se for um merge/push na main (não faz deploy de Pull Requests)
     if: github.ref == 'refs/heads/main' 
+    
+    # Aplicamos a mesma regra para o build
+    defaults:
+      run:
+        working-directory: ./motor-core-java
+
     steps:
       - name: 📥 Baixar o código do repositório
         uses: actions/checkout@v4
@@ -60,7 +71,8 @@ jobs:
         env:
           ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
           ECR_REPOSITORY: motor-transferencia
-          IMAGE_TAG: ${{ github.sha }} # Prática Sênior: Usar o hash do commit como tag, além do 'latest'
+          IMAGE_TAG: ${{ github.sha }}
         run: |
+          # Como o working-directory está configurado, ele vai achar o Dockerfile corretamente
           docker build -t $ECR_REGISTRY/$ECR_REPOSITORY:latest -t $ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG .
           docker push $ECR_REGISTRY/$ECR_REPOSITORY --all-tags
