@@ -1,8 +1,8 @@
 package br.com.banco.transferencia.infrastructure.web;
 
 import br.com.banco.transferencia.domain.Transacao;
+
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
 import java.util.UUID;
 
 public record TransacaoResponse(
@@ -11,8 +11,9 @@ public record TransacaoResponse(
         UUID contaDestinoId,
         BigDecimal valor,
         String status,
-        LocalDateTime dataCriacao
+        String dataCriacao // Mudamos de LocalDateTime para String!
 ) {
+
     // Factory Method Sênior: Encapsula a conversão de Domínio -> Web
     public static TransacaoResponse fromDomain(Transacao transacao) {
         return new TransacaoResponse(
@@ -21,7 +22,7 @@ public record TransacaoResponse(
                 transacao.getContaDestinoId(),
                 transacao.getValor(),
                 transacao.getStatus().name(),
-                transacao.getDataCriacao()
+                transacao.getDataCriacao() != null ? transacao.getDataCriacao().toString() : null
         );
     }
 }
