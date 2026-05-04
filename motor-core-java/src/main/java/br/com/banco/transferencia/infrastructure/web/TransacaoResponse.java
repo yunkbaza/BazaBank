@@ -11,7 +11,7 @@ public record TransacaoResponse(
         UUID contaDestinoId,
         BigDecimal valor,
         String status,
-        String dataCriacao // Mudamos de LocalDateTime para String!
+        String dataCriacao
 ) {
 
     // Factory Method Sênior: Encapsula a conversão de Domínio -> Web

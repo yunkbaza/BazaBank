@@ -1,6 +1,7 @@
 package br.com.banco.transferencia.infrastructure.persistence;
 
 import br.com.banco.transferencia.domain.StatusTransacao;
+import com.fasterxml.jackson.annotation.JsonFormat;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -19,6 +20,8 @@ public class TransacaoEntity {
     @Enumerated(EnumType.STRING)
     private StatusTransacao status;
 
+    // A MÁGICA ESTÁ AQUI: Ensina o Jackson a converter a data para texto no GET
+    @JsonFormat(pattern = "yyyy-MM-dd'T'HH:mm:ss")
     private LocalDateTime dataCriacao;
 
     // Construtor vazio obrigatório do JPA
