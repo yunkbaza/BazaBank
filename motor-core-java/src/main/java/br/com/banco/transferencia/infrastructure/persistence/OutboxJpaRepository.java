@@ -9,6 +9,7 @@ import java.util.UUID;
 @Repository
 public interface OutboxJpaRepository extends JpaRepository<OutboxEntity, UUID> {
 
-    // Método mágico do Spring Data para buscar apenas os eventos que ainda não foram para o Kafka
-    List<OutboxEntity> findByProcessadoFalseOrderByDataCriacaoAsc();
+    // O Spring faz a query automática: SELECT * FROM outbox_events WHERE processado = false
+    List<OutboxEntity> findByProcessadoFalse();
+
 }
