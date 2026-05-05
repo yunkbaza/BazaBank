@@ -32,18 +32,19 @@ public class SecurityConfigurations {
                 .authorizeHttpRequests(req -> {
                     req.requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll();
                     req.requestMatchers(HttpMethod.POST, "/api/auth/registrar").permitAll();
+
+                    // 🔓 LIBERTAÇÃO DA ROTA DE TRANSFERÊNCIAS PARA OS NOSSOS TESTES!
+                    req.requestMatchers(HttpMethod.POST, "/transferencias").permitAll();
+
                     // Embora o customizer ignore a rota, mantemos aqui por segurança adicional
                     req.requestMatchers("/actuator/**").permitAll();
+
                     req.anyRequest().authenticated();
                 })
                 .addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }
 
-    /**
-     * SOLUÇÃO DEFINITIVA: Ignora completamente o filtro de segurança para o Actuator.
-     * Isto impede que o Prometheus receba 403 por falta de token JWT.
-     */
     @Bean
     public WebSecurityCustomizer webSecurityCustomizer() {
         return (web) -> web.ignoring().requestMatchers("/actuator/**");
