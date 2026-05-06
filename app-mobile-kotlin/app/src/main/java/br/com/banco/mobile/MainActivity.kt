@@ -50,6 +50,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import br.com.banco.mobile.ui.theme.BazaBankAppTheme
+import java.util.UUID
 
 // ==========================================
 // 1. O CÉREBRO DA APLICAÇÃO (VIEWMODEL)
@@ -68,6 +69,7 @@ class BazaViewModel : ViewModel() {
     val mensagemErro: StateFlow<String> = _mensagemErro.asStateFlow()
 
     fun limparErro() { _mensagemErro.value = "" }
+    fun setErro(msg: String) { _mensagemErro.value = msg } // Auxiliar para erros locais na UI
 
     fun login(cpf: String, senha: String, onSuccess: () -> Unit) {
         viewModelScope.launch {
@@ -130,15 +132,30 @@ class BazaViewModel : ViewModel() {
             _mensagemErro.value = ""
             try {
                 val pedido = TransferenciaRequest(SessaoApp.contaIdAtual, chaveDestino, valor)
-                // Usando a chave de Idempotência!
-                val resposta = RedeBazaBank.api.transferir(java.util.UUID.randomUUID().toString(), pedido)
-                if (resposta.status == "SUCESSO") {
-                    atualizarHome()
-                    onSuccess()
+
+                // Gerando a chave única de Idempotência para este clique!
+                val idempotencyKey = UUID.randomUUID().toString()
+
+                // Chamada à API esperando um Response (para ler os HTTP Status Codes)
+                val resposta = RedeBazaBank.api.transferir(idempotencyKey, pedido)
+
+                if (resposta.isSuccessful) {
+                    val corpo = resposta.body()
+                    if (corpo?.status == "SUCESSO") {
+                        atualizarHome()
+                        onSuccess()
+                    }
+                } else if (resposta.code() == 409) {
+                    // O nosso Redis bloqueou a requisição dupla!
+                    _mensagemErro.value = "⚠️ Transação em andamento ou duplicada."
+                } else {
+                    _mensagemErro.value = "❌ Erro ao processar PIX (Código: ${resposta.code()})."
                 }
             } catch (e: Exception) {
-                _mensagemErro.value = "❌ Erro ao enviar PIX."
-            } finally { _isLoading.value = false }
+                _mensagemErro.value = "❌ Erro de conexão: Verifique a internet."
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 }
@@ -192,7 +209,7 @@ fun BazaBankNavegacao(viewModel: BazaViewModel) {
 }
 
 // ==========================================
-// 4. TELAS DA APLICAÇÃO (COM PROTEÇÃO ANTI-FREEZE)
+// 4. TELAS DA APLICAÇÃO
 // ==========================================
 
 @Composable
@@ -202,14 +219,14 @@ fun EcraLogin(navController: NavController, viewModel: BazaViewModel) {
 
     val isLoading by viewModel.isLoading.collectAsState()
     val erro by viewModel.mensagemErro.collectAsState()
-    val scrollState = rememberScrollState() // SÊNIOR: Gestão de Rolagem para o teclado não travar
+    val scrollState = rememberScrollState()
 
     LaunchedEffect(Unit) { viewModel.limparErro() }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .verticalScroll(scrollState) // Aplicação do Scroll
+            .verticalScroll(scrollState)
             .padding(32.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
@@ -253,7 +270,7 @@ fun EcraLogin(navController: NavController, viewModel: BazaViewModel) {
         TextButton(onClick = { navController.navigate("registro") }) {
             Text("Abrir uma conta BazaBank", color = BazaDark, fontWeight = FontWeight.Bold)
         }
-        Spacer(modifier = Modifier.height(48.dp)) // Espaço extra para o teclado não tapar o botão
+        Spacer(modifier = Modifier.height(48.dp))
     }
 }
 
@@ -358,7 +375,6 @@ fun EcraHome(navController: NavController, viewModel: BazaViewModel) {
         Text("Ações Rápidas", modifier = Modifier.padding(horizontal = 24.dp), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = BazaDark)
         Spacer(modifier = Modifier.height(16.dp))
 
-        // SÊNIOR: Distribuição Proporcional Perfeita dos Botões
         Row(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.SpaceEvenly
@@ -382,7 +398,7 @@ fun EcraTransferencia(navController: NavController, viewModel: BazaViewModel) {
     val isLoading by viewModel.isLoading.collectAsState()
     val erro by viewModel.mensagemErro.collectAsState()
     val scrollState = rememberScrollState()
-    val focusManager = LocalFocusManager.current // Gestor de fecho de teclado
+    val focusManager = LocalFocusManager.current
 
     LaunchedEffect(Unit) { viewModel.limparErro() }
 
@@ -405,7 +421,7 @@ fun EcraTransferencia(navController: NavController, viewModel: BazaViewModel) {
                 textStyle = androidx.compose.ui.text.TextStyle(fontSize = 48.sp, fontWeight = FontWeight.ExtraBold, color = BazaDark),
                 placeholder = { Text("R$ 0.00", fontSize = 48.sp, fontWeight = FontWeight.ExtraBold, color = Color.LightGray) },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }), // Baixa o teclado sozinho
+                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                 colors = TextFieldDefaults.colors(
                     focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
                     focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent
@@ -427,11 +443,17 @@ fun EcraTransferencia(navController: NavController, viewModel: BazaViewModel) {
                 onClick = {
                     focusManager.clearFocus()
                     val valor = valorInput.toDoubleOrNull()
-                    if (valor != null && valor > 0 && valor <= saldo) {
-                        viewModel.transferir("22222222-2222-2222-2222-222222222222", valor) {
-                            sucessoMsg = "✅ PIX Enviado com Sucesso!"
-                            valorInput = ""
+                    if (valor != null && valor > 0) {
+                        if (valor <= saldo) {
+                            viewModel.transferir("22222222-2222-2222-2222-222222222222", valor) {
+                                sucessoMsg = "✅ PIX Enviado com Sucesso!"
+                                valorInput = ""
+                            }
+                        } else {
+                            viewModel.setErro("⚠️ Saldo insuficiente!")
                         }
+                    } else {
+                        viewModel.setErro("⚠️ Digite um valor válido!")
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(60.dp),
@@ -554,7 +576,7 @@ fun BazaTextField(value: String, onValueChange: (String) -> Unit, label: String,
 fun QuickActionButton(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = modifier.clickable(onClick = onClick).padding(vertical = 8.dp) // SÊNIOR: Hitbox maior e organizada
+        modifier = modifier.clickable(onClick = onClick).padding(vertical = 8.dp)
     ) {
         Box(modifier = Modifier.size(64.dp).clip(CircleShape).background(Color.White), contentAlignment = Alignment.Center) {
             Icon(icon, contentDescription = label, tint = BazaDark, modifier = Modifier.size(28.dp))
