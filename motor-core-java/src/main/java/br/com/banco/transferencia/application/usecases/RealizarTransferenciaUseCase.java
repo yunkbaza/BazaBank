@@ -2,11 +2,16 @@ package br.com.banco.transferencia.application.usecases;
 
 import br.com.banco.transferencia.application.ports.out.*;
 import br.com.banco.transferencia.domain.*;
+import br.com.banco.transferencia.domain.events.TransferenciaRealizadaEvent;
+import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.math.BigDecimal;
 import java.util.UUID;
 
+@Service
 public class RealizarTransferenciaUseCase {
+
     private final ContaRepositoryPort contaRepository;
     private final TransacaoRepositoryPort transacaoRepository;
     private final TransferenciaEventPublisherPort eventPublisher;
@@ -17,7 +22,7 @@ public class RealizarTransferenciaUseCase {
         this.eventPublisher = e;
     }
 
-    @Transactional
+    @Transactional(rollbackFor = Exception.class)
     public Transacao executar(UUID origemId, UUID destinoId, BigDecimal valor) {
         if (origemId.equals(destinoId)) throw new IllegalArgumentException("Contas iguais");
 
@@ -40,6 +45,16 @@ public class RealizarTransferenciaUseCase {
         contaRepository.salvar(origem);
         contaRepository.salvar(destino);
         transacaoRepository.salvar(transacao);
+
+        // CORREÇÃO: Passando os 4 parâmetros exatos que o seu evento espera!
+        TransferenciaRealizadaEvent evento = new TransferenciaRealizadaEvent(
+                transacao.getId(),
+                transacao.getContaOrigemId(),
+                transacao.getContaDestinoId(),
+                transacao.getValor()
+        );
+
+        eventPublisher.publicar(evento);
 
         return transacao;
     }
