@@ -7,6 +7,7 @@ import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.*
 import kotlinx.coroutines.flow.MutableSharedFlow
 import java.util.concurrent.TimeUnit
+import android.util.Log
 
 // ==========================================
 // 1. SESSÃO E SEGURANÇA (Gestão Reativa)
@@ -45,17 +46,16 @@ interface BazaBankApiService {
     @POST("/api/auth/login")
     suspend fun login(@Body request: AuthRequest): TokenResponse
 
-    // 🔥 CORREÇÃO 1: Removido o "/api" do caminho para bater exatamente com o seu Controller do Spring
     @POST("/transferencias")
     suspend fun transferir(
         @Header("Idempotency-Key") idempotencyKey: String,
         @Body request: TransferenciaRequest
     ): Response<TransacaoResponse>
 
-    @GET("/api/contas/{id}")
+    @GET("/contas/{id}")
     suspend fun buscarConta(@Path("id") id: String): ContaResponse
 
-    @GET("/api/contas/{id}/extrato")
+    @GET("/contas/{id}/extrato")
     suspend fun buscarExtrato(@Path("id") id: String): List<TransacaoExtrato>
 }
 
@@ -64,7 +64,6 @@ interface BazaBankApiService {
 // ==========================================
 object RedeBazaBank {
 
-    // 🔥 CORREÇÃO 2: A porta mudou para 8081 (o seu servidor correto)
     private const val BASE_URL = "http://10.0.2.2:8081"
 
     private val httpClient = OkHttpClient.Builder()
@@ -72,18 +71,23 @@ object RedeBazaBank {
         .readTimeout(15, TimeUnit.SECONDS)
         .addInterceptor { chain ->
             val original = chain.request()
-
-            // 1. Cola o Crachá (Token) se existir
             val requestBuilder = original.newBuilder()
+
+            Log.d("BAZABANK_REDE", "Interceptor: Token atual é [${SessaoApp.tokenJwt}]")
+
             if (SessaoApp.tokenJwt.isNotEmpty()) {
                 requestBuilder.header("Authorization", "Bearer ${SessaoApp.tokenJwt}")
+                Log.d("BAZABANK_REDE", "Interceptor: Header Authorization adicionado!")
             }
 
-            // 2. Faz o pedido ao Spring Boot
-            val response = chain.proceed(requestBuilder.build())
+            val request = requestBuilder.build()
 
-            // 3. A CORREÇÃO ESTÁ AQUI: Usar .code() com parênteses!
+            Log.d("BAZABANK_REDE", "Interceptor: A enviar pedido para ${request.url()}")
+
+            val response = chain.proceed(request)
+
             if (response.code() == 401 && SessaoApp.tokenJwt.isNotEmpty()) {
+                Log.e("BAZABANK_REDE", "Interceptor: Erro 401. Encerrando sessão.")
                 SessaoApp.encerrarSessao()
             }
 
