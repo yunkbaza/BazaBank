@@ -33,10 +33,13 @@ public class SecurityConfigurations {
                     // 🔓 Rota Pública: Qualquer um pode aceder para criar conta ou entrar
                     req.requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll();
                     req.requestMatchers(HttpMethod.POST, "/api/auth/registrar").permitAll();
+                    req.requestMatchers("/error").permitAll();
 
                     // 🔐 Rotas Protegidas: O Token (JWT) É OBRIGATÓRIO (O seu SecurityFilter vai tratar disso)
                     req.requestMatchers(HttpMethod.POST, "/transferencias").authenticated();
-                    req.requestMatchers(HttpMethod.GET, "/contas/**").authenticated(); // <-- O MISTÉRIO RESOLVIDO!
+                    req.requestMatchers(HttpMethod.GET, "/contas/**").authenticated();
+                    req.requestMatchers(HttpMethod.GET, "/contas/*/extrato").authenticated();
+
 
                     // Monitorização do Actuator (Pública)
                     req.requestMatchers("/actuator/**").permitAll();
