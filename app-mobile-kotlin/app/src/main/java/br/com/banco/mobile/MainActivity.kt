@@ -1,6 +1,8 @@
 package br.com.banco.mobile
 
+import android.util.Log
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -18,8 +20,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.ExitToApp
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Notifications
@@ -30,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -69,7 +74,7 @@ class BazaViewModel : ViewModel() {
     val mensagemErro: StateFlow<String> = _mensagemErro.asStateFlow()
 
     fun limparErro() { _mensagemErro.value = "" }
-    fun setErro(msg: String) { _mensagemErro.value = msg } // Auxiliar para erros locais na UI
+    fun setErro(msg: String) { _mensagemErro.value = msg }
 
     fun login(cpf: String, senha: String, onSuccess: () -> Unit) {
         viewModelScope.launch {
@@ -106,11 +111,19 @@ class BazaViewModel : ViewModel() {
         viewModelScope.launch {
             _isLoading.value = true
             try {
+                Log.d("BAZABANK_REDE", "A tentar buscar saldo da conta: ${SessaoApp.contaIdAtual}")
                 val conta = RedeBazaBank.api.buscarConta(SessaoApp.contaIdAtual)
                 _saldo.value = conta.saldo
+                Log.d("BAZABANK_REDE", "Saldo recebido com sucesso: ${conta.saldo}")
+            } catch (e: retrofit2.HttpException) {
+                Log.e("BAZABANK_REDE", "Erro HTTP do Backend: Código ${e.code()} - ${e.message()}")
+                _mensagemErro.value = "Erro no servidor: ${e.code()}"
             } catch (e: Exception) {
+                Log.e("BAZABANK_REDE", "Erro na app: ${e.message}")
                 _mensagemErro.value = "Erro ao buscar dados."
-            } finally { _isLoading.value = false }
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 
@@ -132,11 +145,8 @@ class BazaViewModel : ViewModel() {
             _mensagemErro.value = ""
             try {
                 val pedido = TransferenciaRequest(SessaoApp.contaIdAtual, chaveDestino, valor)
-
-                // Gerando a chave única de Idempotência para este clique!
                 val idempotencyKey = UUID.randomUUID().toString()
 
-                // Chamada à API esperando um Response (para ler os HTTP Status Codes)
                 val resposta = RedeBazaBank.api.transferir(idempotencyKey, pedido)
 
                 if (resposta.isSuccessful) {
@@ -146,7 +156,6 @@ class BazaViewModel : ViewModel() {
                         onSuccess()
                     }
                 } else if (resposta.code() == 409) {
-                    // O nosso Redis bloqueou a requisição dupla!
                     _mensagemErro.value = "⚠️ Transação em andamento ou duplicada."
                 } else {
                     _mensagemErro.value = "❌ Erro ao processar PIX (Código: ${resposta.code()})."
@@ -329,6 +338,7 @@ fun EcraHome(navController: NavController, viewModel: BazaViewModel) {
     val saldo by viewModel.saldo.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val scrollState = rememberScrollState()
+    val context = LocalContext.current // Usado para mostrar os Toasts
 
     LaunchedEffect(Unit) { viewModel.atualizarHome() }
 
@@ -346,8 +356,16 @@ fun EcraHome(navController: NavController, viewModel: BazaViewModel) {
                     Text("Investidor", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = BazaDark)
                 }
             }
-            IconButton(onClick = { SessaoApp.encerrarSessao() }) {
-                Icon(Icons.Outlined.Notifications, contentDescription = "Sair", tint = BazaDark)
+
+            Row {
+                IconButton(onClick = {
+                    Toast.makeText(context, "🔔 Sem novas notificações", Toast.LENGTH_SHORT).show()
+                }) {
+                    Icon(Icons.Outlined.Notifications, contentDescription = "Notificações", tint = BazaDark)
+                }
+                IconButton(onClick = { SessaoApp.encerrarSessao() }) {
+                    Icon(Icons.Default.ExitToApp, contentDescription = "Sair", tint = Color.Red)
+                }
             }
         }
 
@@ -381,8 +399,12 @@ fun EcraHome(navController: NavController, viewModel: BazaViewModel) {
         ) {
             QuickActionButton(icon = Icons.AutoMirrored.Filled.Send, label = "Área PIX", modifier = Modifier.weight(1f), onClick = { navController.navigate("transferencia") })
             QuickActionButton(icon = Icons.Outlined.CreditCard, label = "Extrato", modifier = Modifier.weight(1f), onClick = { navController.navigate("extrato") })
-            QuickActionButton(icon = Icons.Outlined.Home, label = "Atualizar", modifier = Modifier.weight(1f), onClick = { viewModel.atualizarHome() })
-            QuickActionButton(icon = Icons.Default.Person, label = "Perfil", modifier = Modifier.weight(1f), onClick = { })
+
+            QuickActionButton(icon = Icons.Default.Refresh, label = "Atualizar", modifier = Modifier.weight(1f), onClick = { viewModel.atualizarHome() })
+
+            QuickActionButton(icon = Icons.Default.Person, label = "Perfil", modifier = Modifier.weight(1f), onClick = {
+                Toast.makeText(context, "👤 Perfil em construção!", Toast.LENGTH_SHORT).show()
+            })
         }
         Spacer(modifier = Modifier.height(40.dp))
     }
