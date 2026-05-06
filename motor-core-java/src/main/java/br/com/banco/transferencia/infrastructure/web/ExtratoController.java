@@ -1,19 +1,16 @@
-// 1. Erro do pacote resolvido (agora aponta para o caminho exato da sua pasta!)
 package br.com.banco.transferencia.infrastructure.web;
 
 import br.com.banco.transferencia.infrastructure.persistence.TransacaoEntity;
 import br.com.banco.transferencia.infrastructure.persistence.TransacaoJpaRepository;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.UUID; // 2. Erro do UUID resolvido (import adicionado!)
+import java.util.UUID;
+import java.util.stream.Collectors;
 
 @RestController
-@RequestMapping("/api/contas/{contaId}/extrato")
+@RequestMapping("/contas")
 public class ExtratoController {
 
     private final TransacaoJpaRepository repository;
@@ -22,14 +19,26 @@ public class ExtratoController {
         this.repository = repository;
     }
 
-    @GetMapping
-    public ResponseEntity<List<TransacaoEntity>> obterExtrato(@PathVariable String contaId) {
-        // Converte a String do Android para UUID
+    // Criamos um pequeno "molde" (DTO) para o Jackson não chorar com a data
+    public record TransacaoExtratoDTO(String id, String contaOrigemId, String contaDestinoId, java.math.BigDecimal valor, String dataCriacao) {}
+
+    @GetMapping("/{contaId}/extrato")
+    public ResponseEntity<List<TransacaoExtratoDTO>> obterExtrato(@PathVariable String contaId) {
         UUID idBusca = UUID.fromString(contaId);
 
-        // Faz a busca na base de dados
         List<TransacaoEntity> transacoes = repository.findByContaOrigemIdOrContaDestinoIdOrderByDataCriacaoDesc(idBusca, idBusca);
 
-        return ResponseEntity.ok(transacoes);
+        // Convertendo as Entidades para os "Moldes" seguros (transformando a data numa String)
+        List<TransacaoExtratoDTO> resposta = transacoes.stream()
+                .map(t -> new TransacaoExtratoDTO(
+                        t.getId().toString(),
+                        t.getContaOrigemId().toString(),
+                        t.getContaDestinoId().toString(),
+                        t.getValor(),
+                        t.getDataCriacao() != null ? t.getDataCriacao().toString() : ""
+                ))
+                .collect(Collectors.toList());
+
+        return ResponseEntity.ok(resposta);
     }
 }
