@@ -38,11 +38,6 @@ data class TransacaoExtrato(val id: String, val contaOrigemId: String, val conta
 // 3. INTERFACE DA API
 // ==========================================
 interface BazaBankApiService {
-    @POST("/api/transferencias")
-    suspend fun transferir(
-        @Header("Idempotency-Key") idempotencyKey: String, // <-- NOVO CÓDIGO
-        @Body request: TransferenciaRequest
-    ): TransacaoResponse
 
     @POST("/api/auth/registrar")
     suspend fun registrar(@Body request: AuthRequest): Response<Void>
@@ -50,8 +45,12 @@ interface BazaBankApiService {
     @POST("/api/auth/login")
     suspend fun login(@Body request: AuthRequest): TokenResponse
 
-    @POST("/api/transferencias")
-    suspend fun transferir(@Body request: TransferenciaRequest): TransacaoResponse
+    // 🔥 CORREÇÃO 1: Removido o "/api" do caminho para bater exatamente com o seu Controller do Spring
+    @POST("/transferencias")
+    suspend fun transferir(
+        @Header("Idempotency-Key") idempotencyKey: String,
+        @Body request: TransferenciaRequest
+    ): Response<TransacaoResponse>
 
     @GET("/api/contas/{id}")
     suspend fun buscarConta(@Path("id") id: String): ContaResponse
@@ -64,7 +63,9 @@ interface BazaBankApiService {
 // 4. CLIENTE RETROFIT CONFIGURADO
 // ==========================================
 object RedeBazaBank {
-    private const val BASE_URL = "http://10.0.2.2:8080"
+
+    // 🔥 CORREÇÃO 2: A porta mudou para 8081 (o seu servidor correto)
+    private const val BASE_URL = "http://10.0.2.2:8081"
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)

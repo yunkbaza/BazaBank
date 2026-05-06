@@ -11,6 +11,34 @@ jobs:
     name: 🧪 Testes e Validação
     runs-on: ubuntu-latest
     
+    # ---------------------------------------------------------
+    # CORREÇÃO: Subindo bancos de dados temporários para o CI
+    # ---------------------------------------------------------
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: root
+          POSTGRES_DB: banco_db
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+          
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
     # Esta configuração diz ao Github que todos os comandos 'run' 
     # deste job devem acontecer dentro da pasta do backend!
     defaults:
@@ -28,7 +56,7 @@ jobs:
           distribution: 'temurin'
           cache: 'maven'
 
-      - name: 🚀 Executar Testes Unitários e de Integração (Testcontainers)
+      - name: 🚀 Executar Testes Unitários e de Integração
         run: mvn clean verify
 
   build-and-push-aws:
