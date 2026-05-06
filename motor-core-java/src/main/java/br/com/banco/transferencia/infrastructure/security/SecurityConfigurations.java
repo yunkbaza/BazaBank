@@ -30,17 +30,21 @@ public class SecurityConfigurations {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(req -> {
+                    // 🔓 Rota Pública: Qualquer um pode aceder para criar conta ou entrar
                     req.requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll();
                     req.requestMatchers(HttpMethod.POST, "/api/auth/registrar").permitAll();
 
-                    // 🔓 LIBERTAÇÃO DA ROTA DE TRANSFERÊNCIAS PARA OS NOSSOS TESTES!
-                    req.requestMatchers(HttpMethod.POST, "/transferencias").permitAll();
+                    // 🔐 Rotas Protegidas: O Token (JWT) É OBRIGATÓRIO (O seu SecurityFilter vai tratar disso)
+                    req.requestMatchers(HttpMethod.POST, "/transferencias").authenticated();
+                    req.requestMatchers(HttpMethod.GET, "/contas/**").authenticated(); // <-- O MISTÉRIO RESOLVIDO!
 
-                    // Embora o customizer ignore a rota, mantemos aqui por segurança adicional
+                    // Monitorização do Actuator (Pública)
                     req.requestMatchers("/actuator/**").permitAll();
 
+                    // Qualquer outra rota não mapeada aqui precisa de token
                     req.anyRequest().authenticated();
                 })
+                // O nosso filtro personalizado que valida o Token JWT
                 .addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }
