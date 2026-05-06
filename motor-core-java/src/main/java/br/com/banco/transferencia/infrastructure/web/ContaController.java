@@ -11,10 +11,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 @RestController
-@RequestMapping("/api/contas")
+@RequestMapping("/contas")
 public class ContaController {
 
-    // Agora sim, injetando o seu Port da Clean Architecture corretamente!
     private final ContaRepositoryPort contaRepositoryPort;
 
     public ContaController(ContaRepositoryPort contaRepositoryPort) {
@@ -26,12 +25,12 @@ public class ContaController {
         Optional<Conta> contaBuscada = contaRepositoryPort.buscarPorId(id);
 
         if (contaBuscada.isEmpty()) {
-            return ResponseEntity.notFound().build(); // Retorna 404 se a conta não existir
+            return ResponseEntity.notFound().build();
         }
 
         Conta conta = contaBuscada.get();
         ContaResponse resposta = new ContaResponse(conta.getId(), conta.getNumero(), conta.getSaldo());
 
-        return ResponseEntity.ok(resposta); // Retorna 200 OK com o JSON do saldo
+        return ResponseEntity.ok(resposta);
     }
 }
