@@ -30,24 +30,15 @@ public class SecurityConfigurations {
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(req -> {
-                    // 🔓 Rota Pública: Qualquer um pode aceder para criar conta ou entrar
                     req.requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll();
                     req.requestMatchers(HttpMethod.POST, "/api/auth/registrar").permitAll();
-                    req.requestMatchers("/error").permitAll();
+                    req.requestMatchers("/error").permitAll(); // Essencial para ver erros 500 no Android
 
-                    // 🔐 Rotas Protegidas: O Token (JWT) É OBRIGATÓRIO (O seu SecurityFilter vai tratar disso)
                     req.requestMatchers(HttpMethod.POST, "/transferencias").authenticated();
                     req.requestMatchers(HttpMethod.GET, "/contas/**").authenticated();
-                    req.requestMatchers(HttpMethod.GET, "/contas/*/extrato").authenticated();
 
-
-                    // Monitorização do Actuator (Pública)
-                    req.requestMatchers("/actuator/**").permitAll();
-
-                    // Qualquer outra rota não mapeada aqui precisa de token
                     req.anyRequest().authenticated();
                 })
-                // O nosso filtro personalizado que valida o Token JWT
                 .addFilterBefore(securityFilter, UsernamePasswordAuthenticationFilter.class)
                 .build();
     }
