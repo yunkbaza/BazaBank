@@ -50,12 +50,14 @@ import androidx.navigation.NavController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.material.pullrefresh.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import br.com.banco.mobile.ui.theme.BazaBankAppTheme
 import java.util.UUID
+
 
 // ==========================================
 // 1. O CÉREBRO DA APLICAÇÃO (VIEWMODEL)
@@ -72,6 +74,10 @@ class BazaViewModel : ViewModel() {
 
     private val _mensagemErro = MutableStateFlow("")
     val mensagemErro: StateFlow<String> = _mensagemErro.asStateFlow()
+
+    private val _usuarioNome = MutableStateFlow("Investidor Baza")
+
+    val usuarioNome: StateFlow<String> = _usuarioNome.asStateFlow()
 
     fun limparErro() { _mensagemErro.value = "" }
     fun setErro(msg: String) { _mensagemErro.value = msg }
@@ -124,6 +130,15 @@ class BazaViewModel : ViewModel() {
             } finally {
                 _isLoading.value = false
             }
+        }
+    }
+
+    fun carregarPerfil() {
+        viewModelScope.launch {
+            try {
+                val conta = RedeBazaBank.api.buscarConta(SessaoApp.contaIdAtual)
+                _usuarioNome.value = conta.titular
+            } catch (e: Exception) { /* erro silencioso */ }
         }
     }
 
@@ -222,6 +237,7 @@ fun BazaBankNavegacao(viewModel: BazaViewModel) {
         composable("home") { EcraHome(navController, viewModel) }
         composable("transferencia") { EcraTransferencia(navController, viewModel) }
         composable("extrato") { EcraExtrato(navController, viewModel) }
+        composable("perfil") { EcraPerfil(navController, viewModel) } // 🔥 NOVO
     }
 }
 
@@ -230,64 +246,121 @@ fun BazaBankNavegacao(viewModel: BazaViewModel) {
 // ==========================================
 
 @Composable
-fun EcraLogin(navController: NavController, viewModel: BazaViewModel) {
-    var cpf by remember { mutableStateOf("") }
-    var senha by remember { mutableStateOf("") }
-
+fun EcraHome(navController: NavController, viewModel: BazaViewModel) {
+    val saldo by viewModel.saldo.collectAsState()
+    val nome by viewModel.usuarioNome.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
-    val erro by viewModel.mensagemErro.collectAsState()
-    val scrollState = rememberScrollState()
+    val context = LocalContext.current
 
-    LaunchedEffect(Unit) { viewModel.limparErro() }
+    LaunchedEffect(Unit) { viewModel.atualizarHome() }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Spacer(modifier = Modifier.height(48.dp))
-        Box(modifier = Modifier.size(72.dp).clip(CircleShape).background(BazaAccent), contentAlignment = Alignment.Center) {
-            Icon(Icons.Outlined.Home, contentDescription = null, tint = Color.White, modifier = Modifier.size(36.dp))
-        }
-        Spacer(modifier = Modifier.height(24.dp))
-        Text("BazaBank", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = BazaDark)
-        Text("Exclusive", fontSize = 16.sp, color = Color.Gray, fontWeight = FontWeight.Medium, letterSpacing = 4.sp)
-
-        Spacer(modifier = Modifier.height(48.dp))
-
-        BazaTextField(value = cpf, onValueChange = { cpf = it }, label = "CPF", icon = Icons.Default.Person)
-        Spacer(modifier = Modifier.height(16.dp))
-        BazaTextField(value = senha, onValueChange = { senha = it }, label = "Senha", icon = Icons.Default.Lock, isPassword = true)
-
-        Spacer(modifier = Modifier.height(32.dp))
-
-        if (erro.isNotEmpty()) {
-            Text(erro, color = Color(0xFFDC2626), modifier = Modifier.padding(bottom = 16.dp), fontWeight = FontWeight.Bold)
-        }
-
-        Button(
-            onClick = {
-                viewModel.login(cpf, senha) {
-                    navController.navigate("home") { popUpTo("login") { inclusive = true } }
+    Box(modifier = Modifier.fillMaxSize()) { // Box para permitir sobrepor o indicador de carga
+        Column(modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 48.dp, bottom = 24.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clickable { navController.navigate("perfil") }
+                ) {
+                    Icon(Icons.Default.AccountCircle, contentDescription = null, tint = BazaDark, modifier = Modifier.size(48.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text("Olá,", fontSize = 14.sp, color = Color.Gray)
+                        Text(nome, fontSize = 18.sp, fontWeight = FontWeight.Bold, color = BazaDark)
+                    }
                 }
-            },
-            modifier = Modifier.fillMaxWidth().height(60.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = BazaAccent),
-            shape = RoundedCornerShape(16.dp),
-            enabled = !isLoading && cpf.isNotBlank() && senha.isNotBlank()
-        ) {
-            if (isLoading) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(28.dp))
-            else Text("Acessar a minha conta", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Row {
+                    IconButton(onClick = { Toast.makeText(context, "🔔 Sem notificações", Toast.LENGTH_SHORT).show() }) {
+                        Icon(Icons.Outlined.Notifications, contentDescription = null, tint = BazaDark)
+                    }
+                    IconButton(onClick = { SessaoApp.encerrarSessao() }) {
+                        Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color(0xFFDC2626))
+                    }
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).height(200.dp),
+                shape = RoundedCornerShape(24.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
+            ) {
+                Box(modifier = Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF222222), Color.Black)))) {
+                    Column(modifier = Modifier.padding(24.dp).fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Saldo Disponível", color = Color.LightGray, fontSize = 14.sp)
+                            Icon(Icons.Outlined.CreditCard, contentDescription = null, tint = Color.LightGray)
+                        }
+
+                        // 🔥 MELHORIA: O saldo agora reage ao carregamento de forma elegante
+                        if (isLoading && saldo == 0.0) {
+                            CircularProgressIndicator(color = Color.White, modifier = Modifier.size(32.dp))
+                        } else {
+                            Text("R$ ${String.format("%.2f", saldo)}", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(36.dp))
+            Text("Ações Rápidas", modifier = Modifier.padding(horizontal = 24.dp), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = BazaDark)
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                QuickActionButton(Icons.AutoMirrored.Filled.Send, "Área PIX", Modifier.weight(1f)) { navController.navigate("transferencia") }
+                QuickActionButton(Icons.Outlined.CreditCard, "Extrato", Modifier.weight(1f)) { navController.navigate("extrato") }
+
+                // 🔥 O botão de atualizar agora dá feedback visual
+                QuickActionButton(Icons.Default.Refresh, "Atualizar", Modifier.weight(1f)) {
+                    viewModel.atualizarHome()
+                    Toast.makeText(context, "Atualizando dados...", Toast.LENGTH_SHORT).show()
+                }
+
+                QuickActionButton(Icons.Default.Person, "Perfil", Modifier.weight(1f)) { navController.navigate("perfil") }
+            }
+            Spacer(modifier = Modifier.height(40.dp))
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
-        TextButton(onClick = { navController.navigate("registro") }) {
-            Text("Abrir uma conta BazaBank", color = BazaDark, fontWeight = FontWeight.Bold)
+        // 🔵 INDICADOR DE CARGA GLOBAL (Aparece no topo se estiver a carregar)
+        if (isLoading) {
+            LinearProgressIndicator(
+                modifier = Modifier.fillMaxWidth().align(Alignment.TopCenter),
+                color = Color.Black,
+                trackColor = Color.Transparent
+            )
         }
-        Spacer(modifier = Modifier.height(48.dp))
+    }
+}
+
+@Composable
+fun EcraPerfil(navController: NavController, viewModel: BazaViewModel) {
+    val nome by viewModel.usuarioNome.collectAsState()
+
+    Column(modifier = Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        IconButton(onClick = { navController.popBackStack() }, modifier = Modifier.align(Alignment.Start)) {
+            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+        }
+        Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(100.dp), tint = BazaDark)
+        Text(nome, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Text("Conta Exclusive BazaBank", color = Color.Gray)
+
+        Spacer(modifier = Modifier.height(40.dp))
+
+        // Detalhes estáticos para visual
+        ProfileItem("Chave Pix", SessaoApp.contaIdAtual)
+        ProfileItem("Tipo de Conta", "Corrente")
+        ProfileItem("Agência", "0001")
+    }
+}
+
+@Composable
+fun ProfileItem(label: String, value: String) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)) {
+        Text(label, fontSize = 12.sp, color = Color.Gray)
+        Text(value, fontSize = 16.sp, fontWeight = FontWeight.Medium)
+        HorizontalDivider(modifier = Modifier.padding(top = 8.dp), thickness = 0.5.dp)
     }
 }
 
@@ -342,79 +415,29 @@ fun EcraRegistro(navController: NavController, viewModel: BazaViewModel) {
 }
 
 @Composable
-fun EcraHome(navController: NavController, viewModel: BazaViewModel) {
-    val saldo by viewModel.saldo.collectAsState()
+fun EcraLogin(navController: NavController, viewModel: BazaViewModel) {
+    var cpf by remember { mutableStateOf("") }
+    var senha by remember { mutableStateOf("") }
     val isLoading by viewModel.isLoading.collectAsState()
-    val scrollState = rememberScrollState()
-    val context = LocalContext.current // Usado para mostrar os Toasts
+    val erro by viewModel.mensagemErro.collectAsState()
 
-    LaunchedEffect(Unit) { viewModel.atualizarHome() }
-
-    Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(start = 24.dp, end = 24.dp, top = 48.dp, bottom = 24.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.AccountCircle, contentDescription = null, tint = BazaDark, modifier = Modifier.size(48.dp))
-                Spacer(modifier = Modifier.width(12.dp))
-                Column {
-                    Text("Olá,", fontSize = 14.sp, color = Color.Gray)
-                    Text("Investidor", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = BazaDark)
-                }
-            }
-
-            Row {
-                IconButton(onClick = {
-                    Toast.makeText(context, "🔔 Sem novas notificações", Toast.LENGTH_SHORT).show()
-                }) {
-                    Icon(Icons.Outlined.Notifications, contentDescription = "Notificações", tint = BazaDark)
-                }
-                IconButton(onClick = { SessaoApp.encerrarSessao() }) {
-                    Icon(Icons.Default.ExitToApp, contentDescription = "Sair", tint = Color.Red)
-                }
-            }
-        }
-
-        Card(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).height(200.dp),
-            shape = RoundedCornerShape(24.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 16.dp)
-        ) {
-            Box(modifier = Modifier.fillMaxSize().background(Brush.linearGradient(listOf(Color(0xFF222222), Color.Black)))) {
-                Column(modifier = Modifier.padding(24.dp).fillMaxSize(), verticalArrangement = Arrangement.SpaceBetween) {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Text("Saldo Disponível", color = Color.LightGray, fontSize = 14.sp)
-                        Icon(Icons.Outlined.CreditCard, contentDescription = null, tint = Color.LightGray)
-                    }
-                    if (isLoading && saldo == 0.0) {
-                        CircularProgressIndicator(color = Color.White, modifier = Modifier.size(32.dp))
-                    } else {
-                        Text("R$ ${String.format("%.2f", saldo)}", fontSize = 40.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(36.dp))
-        Text("Ações Rápidas", modifier = Modifier.padding(horizontal = 24.dp), fontSize = 18.sp, fontWeight = FontWeight.Bold, color = BazaDark)
+    Column(modifier = Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+        Icon(Icons.Outlined.Home, contentDescription = null, modifier = Modifier.size(72.dp).clip(CircleShape).background(BazaAccent).padding(16.dp), tint = Color.White)
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("BazaBank", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
+        Spacer(modifier = Modifier.height(48.dp))
+        BazaTextField(cpf, { cpf = it }, "CPF", Icons.Default.Person)
         Spacer(modifier = Modifier.height(16.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            QuickActionButton(icon = Icons.AutoMirrored.Filled.Send, label = "Área PIX", modifier = Modifier.weight(1f), onClick = { navController.navigate("transferencia") })
-            QuickActionButton(icon = Icons.Outlined.CreditCard, label = "Extrato", modifier = Modifier.weight(1f), onClick = { navController.navigate("extrato") })
-
-            QuickActionButton(icon = Icons.Default.Refresh, label = "Atualizar", modifier = Modifier.weight(1f), onClick = { viewModel.atualizarHome() })
-
-            QuickActionButton(icon = Icons.Default.Person, label = "Perfil", modifier = Modifier.weight(1f), onClick = {
-                Toast.makeText(context, "👤 Perfil em construção!", Toast.LENGTH_SHORT).show()
-            })
+        BazaTextField(senha, { senha = it }, "Senha", Icons.Default.Lock, isPassword = true)
+        Spacer(modifier = Modifier.height(24.dp))
+        if (erro.isNotEmpty()) Text(erro, color = Color.Red, fontWeight = FontWeight.Bold)
+        Spacer(modifier = Modifier.height(24.dp))
+        Button(onClick = { viewModel.login(cpf, senha) { navController.navigate("home") { popUpTo("login") { inclusive = true } } } },
+            modifier = Modifier.fillMaxWidth().height(60.dp), shape = RoundedCornerShape(16.dp), colors = ButtonDefaults.buttonColors(containerColor = BazaAccent), enabled = !isLoading) {
+            if (isLoading) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(28.dp))
+            else Text("Acessar Conta", fontWeight = FontWeight.Bold, color = Color.White)
         }
-        Spacer(modifier = Modifier.height(40.dp))
+        TextButton(onClick = { navController.navigate("registro") }) { Text("Abrir conta BazaBank", color = BazaDark, fontWeight = FontWeight.Bold) }
     }
 }
 
