@@ -89,6 +89,9 @@ class BazaViewModel : ViewModel() {
             try {
                 val resposta = RedeBazaBank.api.login(AuthRequest(cpf, senha))
                 SessaoApp.tokenJwt = resposta.token
+
+                SessaoApp.contaIdAtual = resposta.contaId
+
                 onSuccess()
             } catch (e: Exception) {
                 _mensagemErro.value = "❌ CPF ou senha inválidos."
@@ -445,6 +448,9 @@ fun EcraLogin(navController: NavController, viewModel: BazaViewModel) {
 @Composable
 fun EcraTransferencia(navController: NavController, viewModel: BazaViewModel) {
     var valorInput by remember { mutableStateOf("") }
+
+    // 🔥 1. A MÁGICA: Criámos o estado para guardar o que o utilizador digita!
+    var chaveDestinoInput by remember { mutableStateOf("") }
     var sucessoMsg by remember { mutableStateOf("") }
 
     val saldo by viewModel.saldo.collectAsState()
@@ -455,69 +461,83 @@ fun EcraTransferencia(navController: NavController, viewModel: BazaViewModel) {
 
     LaunchedEffect(Unit) { viewModel.limparErro() }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        TopAppBar(
-            title = { Text("Área PIX", fontWeight = FontWeight.Bold, color = BazaDark) },
-            navigationIcon = {
-                IconButton(onClick = { navController.popBackStack() }) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Voltar", tint = BazaDark)
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("Área PIX") },
+                navigationIcon = {
+                    IconButton(onClick = { navController.popBackStack() }) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
+                    }
                 }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = BazaBackground)
-        )
-
-        Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState).padding(horizontal = 24.dp, vertical = 16.dp)) {
-            Text("Quanto deseja transferir?", fontSize = 16.sp, color = Color.Gray, fontWeight = FontWeight.Medium)
+            )
+        }
+    ) { p ->
+        Column(modifier = Modifier.padding(p).padding(24.dp).verticalScroll(scrollState)) {
+            Text("Quanto deseja enviar?", color = Color.Gray)
             TextField(
                 value = valorInput,
                 onValueChange = { valorInput = it },
-                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 48.sp, fontWeight = FontWeight.ExtraBold, color = BazaDark),
-                placeholder = { Text("R$ 0.00", fontSize = 48.sp, fontWeight = FontWeight.ExtraBold, color = Color.LightGray) },
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Done),
-                keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
+                textStyle = androidx.compose.ui.text.TextStyle(fontSize = 48.sp, fontWeight = FontWeight.Bold),
+                placeholder = { Text("R$ 0.00", fontSize = 48.sp, color = Color.LightGray) },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal, imeAction = ImeAction.Next),
+                modifier = Modifier.fillMaxWidth(),
                 colors = TextFieldDefaults.colors(
-                    focusedContainerColor = Color.Transparent, unfocusedContainerColor = Color.Transparent,
-                    focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent
-                ),
-                modifier = Modifier.fillMaxWidth()
+                    focusedContainerColor = Color.Transparent,
+                    unfocusedContainerColor = Color.Transparent,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent
+                )
             )
 
-            Text("Seu saldo: R$ ${String.format("%.2f", saldo)}", color = Color.Gray, fontSize = 14.sp)
+            Text("Seu saldo: R$ ${String.format("%.2f", saldo)}", color = Color.Gray)
             Spacer(modifier = Modifier.height(32.dp))
 
-            BazaTextField(value = "22222222-2222-2222-2222-222222222222", onValueChange = {}, label = "Chave de Destino", readOnly = true)
+            // 🔥 2. O CAMPO AGORA É EDITÁVEL! O utilizador pode colar a chave aqui.
+            BazaTextField(
+                value = chaveDestinoInput,
+                onValueChange = { chaveDestinoInput = it },
+                label = "Chave Destino (ID da Conta)",
+                readOnly = false // Mudámos de true para false!
+            )
 
-            Spacer(modifier = Modifier.height(40.dp))
+            Spacer(modifier = Modifier.height(32.dp))
 
-            if (erro.isNotEmpty()) Text(erro, color = Color(0xFFDC2626), modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp))
-            if (sucessoMsg.isNotEmpty()) Text(sucessoMsg, color = Color(0xFF059669), modifier = Modifier.align(Alignment.CenterHorizontally).padding(bottom = 16.dp), fontWeight = FontWeight.Bold)
+            if (erro.isNotEmpty()) Text(erro, color = Color.Red, fontWeight = FontWeight.Bold)
+            if (sucessoMsg.isNotEmpty()) Text(sucessoMsg, color = Color(0xFF059669), fontWeight = FontWeight.Bold)
+
+            Spacer(modifier = Modifier.height(16.dp))
 
             Button(
                 onClick = {
                     focusManager.clearFocus()
-                    val valor = valorInput.toDoubleOrNull()
-                    if (valor != null && valor > 0) {
-                        if (valor <= saldo) {
-                            viewModel.transferir("22222222-2222-2222-2222-222222222222", valor) {
-                                sucessoMsg = "✅ PIX Enviado com Sucesso!"
-                                valorInput = ""
-                            }
-                        } else {
-                            viewModel.setErro("⚠️ Saldo insuficiente!")
-                        }
+                    val v = valorInput.toDoubleOrNull() ?: 0.0
+                    val chaveLimpa = chaveDestinoInput.trim()
+
+                    // 🔥 3. VALIDAÇÕES SÉNIOR (A Melhor Forma!)
+                    if (chaveLimpa.isBlank()) {
+                        viewModel.setErro("⚠️ Digite a chave de destino!")
+                    } else if (chaveLimpa == SessaoApp.contaIdAtual) {
+                        viewModel.setErro("⚠️ Não pode transferir para si mesmo!")
+                    } else if (v !in 0.01..saldo) {
+                        viewModel.setErro("⚠️ Valor inválido ou saldo insuficiente!")
                     } else {
-                        viewModel.setErro("⚠️ Digite um valor válido!")
+                        // Se passar em todos os testes, envia para a chave digitada
+                        viewModel.transferir(chaveLimpa, v) {
+                            sucessoMsg = "✅ PIX Enviado com sucesso!"
+                            valorInput = "" // Limpa o valor
+                            chaveDestinoInput = "" // Limpa a chave destino
+                        }
                     }
                 },
                 modifier = Modifier.fillMaxWidth().height(60.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = BazaAccent),
                 shape = RoundedCornerShape(16.dp),
-                enabled = !isLoading && valorInput.isNotBlank()
+                colors = ButtonDefaults.buttonColors(containerColor = BazaAccent),
+                enabled = !isLoading
             ) {
                 if (isLoading) CircularProgressIndicator(color = Color.White, modifier = Modifier.size(28.dp))
-                else Text("Confirmar Transferência", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                else Text("Confirmar Envio", fontWeight = FontWeight.Bold, color = Color.White)
             }
-            Spacer(modifier = Modifier.height(24.dp))
         }
     }
 }

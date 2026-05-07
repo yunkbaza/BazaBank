@@ -29,7 +29,7 @@ object SessaoApp {
 // 2. DTOs (Data Transfer Objects)
 // ==========================================
 data class AuthRequest(val cpf: String, val senha: String)
-data class TokenResponse(val token: String, val cpf: String)
+data class TokenResponse(val token: String, val cpf: String, val contaId: String)
 data class TransferenciaRequest(val contaOrigemId: String, val contaDestinoId: String, val valor: Double)
 data class TransacaoResponse(val transacaoId: String, val status: String)
 data class ContaResponse(val id: String, val titular: String, val saldo: Double)
