@@ -56,7 +56,11 @@ interface BazaBankApiService {
     suspend fun buscarConta(@Path("id") id: String): ContaResponse
 
     @GET("/contas/{id}/extrato")
-    suspend fun buscarExtrato(@Path("id") id: String): List<TransacaoExtrato>
+    suspend fun buscarExtrato(
+        @Path("id") id: String,
+        @Query("page") page: Int = 0,
+        @Query("size") size: Int = 20
+    ): List<TransacaoExtrato>
 }
 
 // ==========================================

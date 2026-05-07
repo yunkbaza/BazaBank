@@ -57,6 +57,10 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import br.com.banco.mobile.ui.theme.BazaBankAppTheme
 import java.util.UUID
+import br.com.banco.mobile.R
+import androidx.compose.ui.res.painterResource
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.compose.foundation.Image
 
 
 // ==========================================
@@ -78,6 +82,8 @@ class BazaViewModel : ViewModel() {
     private val _usuarioNome = MutableStateFlow("Investidor Baza")
 
     val usuarioNome: StateFlow<String> = _usuarioNome.asStateFlow()
+
+    var bancoLocal: BazaRoomDatabase? = null
 
     fun limparErro() { _mensagemErro.value = "" }
     fun setErro(msg: String) { _mensagemErro.value = msg }
@@ -149,16 +155,38 @@ class BazaViewModel : ViewModel() {
         viewModelScope.launch {
             _isLoading.value = true
             try {
-                Log.d("BAZABANK_REDE", "A pedir extrato da conta: ${SessaoApp.contaIdAtual}")
-                val transacoes = RedeBazaBank.api.buscarExtrato(SessaoApp.contaIdAtual)
-                _extrato.value = transacoes
-                Log.d("BAZABANK_REDE", "Sucesso! Extrato carregado: ${transacoes.size} movimentos.")
-            } catch (e: retrofit2.HttpException) {
-                // Erro 404 (Rota errada) ou 403
-                Log.e("BAZABANK_REDE", "Erro no Servidor ao buscar extrato: ${e.code()}")
+                // 1. TENTA BUSCAR DA API (Internet)
+                val transacoesOnline = RedeBazaBank.api.buscarExtrato(SessaoApp.contaIdAtual, page = 0, size = 20)
+
+                _extrato.value = transacoesOnline
+
+                // 2. GUARDA NO ROOM PARA MODO OFFLINE (Em Background)
+                bancoLocal?.let { db ->
+                    val dao = db.extratoDao()
+                    val transacoesParaGuardar = transacoesOnline.map { t ->
+                        TransacaoLocal(t.id, t.contaOrigemId, t.contaDestinoId, t.valor, t.dataCriacao, SessaoApp.contaIdAtual)
+                    }
+                    dao.limparExtrato(SessaoApp.contaIdAtual) // Limpa o velho
+                    dao.guardarTransacoes(transacoesParaGuardar) // Guarda o novo
+                }
+
             } catch (e: Exception) {
-                // Erro ao converter o JSON ou falha na rede
-                Log.e("BAZABANK_REDE", "Erro de conversão (JSON) ou Rede: ${e.message}")
+                // 3. SE FALHAR (Sem Internet ou Erro 503), BUSCA DO MODO OFFLINE!
+                Log.e("BAZABANK_REDE", "Erro na API, a tentar carregar Cache Offline...")
+
+                bancoLocal?.let { db ->
+                    val transacoesOffline = db.extratoDao().buscarExtratoOffline(SessaoApp.contaIdAtual)
+
+                    if (transacoesOffline.isNotEmpty()) {
+                        // Converte a versão local de volta para o formato do Ecrã
+                        _extrato.value = transacoesOffline.map { t ->
+                            TransacaoExtrato(t.id, t.contaOrigemId, t.contaDestinoId, t.valor, t.dataCriacao)
+                        }
+                        setErro("⚠️ Modo Offline: A mostrar últimos movimentos guardados.")
+                    } else {
+                        setErro("❌ Sem internet e sem dados guardados no telemóvel.")
+                    }
+                }
             } finally {
                 _isLoading.value = false
             }
@@ -208,11 +236,18 @@ val BazaInputBg = Color(0xFFEBEBEB)
 // ==========================================
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+
+        installSplashScreen()
+
         super.onCreate(savedInstanceState)
+
+        val dbLocal = BazaRoomDatabase.getDatabase(this)
+
         setContent {
             BazaBankAppTheme {
                 Surface(modifier = Modifier.fillMaxSize(), color = BazaBackground) {
                     val viewModel: BazaViewModel = viewModel()
+                    viewModel.bancoLocal = dbLocal // Injeta o banco no ViewModel
                     BazaBankNavegacao(viewModel)
                 }
             }
@@ -425,10 +460,14 @@ fun EcraLogin(navController: NavController, viewModel: BazaViewModel) {
     val erro by viewModel.mensagemErro.collectAsState()
 
     Column(modifier = Modifier.fillMaxSize().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-        Icon(Icons.Outlined.Home, contentDescription = null, modifier = Modifier.size(72.dp).clip(CircleShape).background(BazaAccent).padding(16.dp), tint = Color.White)
-        Spacer(modifier = Modifier.height(24.dp))
-        Text("BazaBank", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold)
-        Spacer(modifier = Modifier.height(48.dp))
+        Image(
+            painter = painterResource(id = R.drawable.logo_baza),
+            contentDescription = "BazaBank Logo",
+            modifier = Modifier
+                .size(250.dp)
+                .padding(bottom = 10.dp)
+        )
+        Spacer(modifier = Modifier.height(16.dp))
         BazaTextField(cpf, { cpf = it }, "CPF", Icons.Default.Person)
         Spacer(modifier = Modifier.height(16.dp))
         BazaTextField(senha, { senha = it }, "Senha", Icons.Default.Lock, isPassword = true)
