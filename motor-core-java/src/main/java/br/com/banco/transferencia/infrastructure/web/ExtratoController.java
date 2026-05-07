@@ -12,32 +12,21 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/contas")
 public class ExtratoController {
-
     private final TransacaoJpaRepository repository;
 
-    public ExtratoController(TransacaoJpaRepository repository) {
-        this.repository = repository;
-    }
+    public ExtratoController(TransacaoJpaRepository repository) { this.repository = repository; }
 
-    // Criamos um pequeno "molde" (DTO) para o Jackson não chorar com a data
     public record TransacaoExtratoDTO(String id, String contaOrigemId, String contaDestinoId, java.math.BigDecimal valor, String dataCriacao) {}
 
     @GetMapping("/{contaId}/extrato")
     public ResponseEntity<List<TransacaoExtratoDTO>> obterExtrato(@PathVariable String contaId) {
-        UUID idBusca = UUID.fromString(contaId);
+        var idBusca = UUID.fromString(contaId);
+        var transacoes = repository.findByContaOrigemIdOrContaDestinoIdOrderByDataCriacaoDesc(idBusca, idBusca);
 
-        List<TransacaoEntity> transacoes = repository.findByContaOrigemIdOrContaDestinoIdOrderByDataCriacaoDesc(idBusca, idBusca);
-
-        // Convertendo as Entidades para os "Moldes" seguros (transformando a data numa String)
-        List<TransacaoExtratoDTO> resposta = transacoes.stream()
-                .map(t -> new TransacaoExtratoDTO(
-                        t.getId().toString(),
-                        t.getContaOrigemId().toString(),
-                        t.getContaDestinoId().toString(),
-                        t.getValor(),
-                        t.getDataCriacao() != null ? t.getDataCriacao().toString() : ""
-                ))
-                .collect(Collectors.toList());
+        var resposta = transacoes.stream().map(t -> new TransacaoExtratoDTO(
+                t.getId().toString(), t.getContaOrigemId().toString(),
+                t.getContaDestinoId().toString(), t.getValor(),
+                t.getDataCriacao().toString())).toList();
 
         return ResponseEntity.ok(resposta);
     }
