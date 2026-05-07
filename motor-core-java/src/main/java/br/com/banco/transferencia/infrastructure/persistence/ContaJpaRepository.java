@@ -15,4 +15,6 @@ public interface ContaJpaRepository extends JpaRepository<ContaEntity, UUID> {
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("SELECT c FROM ContaEntity c WHERE c.id = :id")
     Optional<ContaEntity> findByIdComLock(@Param("id") UUID id);
+
+    Optional<ContaEntity> findByNumero(String numero);
 }
