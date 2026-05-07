@@ -131,11 +131,19 @@ class BazaViewModel : ViewModel() {
         viewModelScope.launch {
             _isLoading.value = true
             try {
+                Log.d("BAZABANK_REDE", "A pedir extrato da conta: ${SessaoApp.contaIdAtual}")
                 val transacoes = RedeBazaBank.api.buscarExtrato(SessaoApp.contaIdAtual)
                 _extrato.value = transacoes
+                Log.d("BAZABANK_REDE", "Sucesso! Extrato carregado: ${transacoes.size} movimentos.")
+            } catch (e: retrofit2.HttpException) {
+                // Erro 404 (Rota errada) ou 403
+                Log.e("BAZABANK_REDE", "Erro no Servidor ao buscar extrato: ${e.code()}")
             } catch (e: Exception) {
-                _mensagemErro.value = "Erro ao carregar extrato."
-            } finally { _isLoading.value = false }
+                // Erro ao converter o JSON ou falha na rede
+                Log.e("BAZABANK_REDE", "Erro de conversão (JSON) ou Rede: ${e.message}")
+            } finally {
+                _isLoading.value = false
+            }
         }
     }
 
