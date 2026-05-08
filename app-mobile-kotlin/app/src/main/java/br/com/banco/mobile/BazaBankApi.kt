@@ -68,7 +68,7 @@ interface BazaBankApiService {
 // ==========================================
 object RedeBazaBank {
 
-    private const val BASE_URL = "http://10.0.2.2:8081"
+    private const val BASE_URL = "https://bazabank.onrender.com"
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
